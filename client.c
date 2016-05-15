@@ -15,6 +15,7 @@ int main(int argc, char **argv)
 	char inbuf[BUFSIZE], outbuf[BUFSIZE];
 	struct sockaddr_in servAddr, cliAddr;
 	socklen_t servAddrLen, cliAddrLen;
+	char *ip;
 
 
 	// check program arguments
@@ -22,10 +23,15 @@ int main(int argc, char **argv)
 		fprintf(stderr, "Usage: ./server SERVER-HOST-OR-IP PORT-NUMBER\n");
 		return 0;
 	}
-	if (!is_host_or_ip(argv[1]) || !is_numeric(argv[2])) {
-		fprintf(stderr, "Error: invalid hostname/ip or invalid port number\n");
+	if (!is_numeric(argv[2])) {
+		fprintf(stderr, "Error: invalid port number\n");
 		return 1;
 	}
+	if (convert_to_ip(argv[1], ip) != 1) {
+		fprintf(stderr, "Error: cannot resolve %s\n", argv[1]);
+		return 1;
+	}
+exit(0);
 
 	// try to create socket
 	if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
@@ -34,7 +40,7 @@ int main(int argc, char **argv)
 	}
 
 	// set server location information
-	char *ip = convert_to_ip(argv[1]);
+	
 	servAddr.sin_family = AF_INET;
 	servAddr.sin_port = htons(atoi(argv[2]));
 	servAddr.sin_addr.s_addr = inet_addr(ip);

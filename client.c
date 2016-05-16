@@ -17,8 +17,8 @@ int main(int argc, char **argv)
 	struct sockaddr_in servAddr, cliAddr;
 	socklen_t servAddrLen, cliAddrLen;
 	char *ip;
-	unsigned short seq, ack;
-	unsigned short rwnd = RWND;
+	uint16_t seq, ack;
+	uint16_t rwnd = RWND;
 	// check program arguments
 	if (argc != 3) {
 		fprintf(stderr, "Usage: ./server SERVER-HOST-OR-IP PORT-NUMBER\n");

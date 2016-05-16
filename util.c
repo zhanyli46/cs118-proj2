@@ -5,6 +5,8 @@
 #include <time.h>
 #include "util.h"
 
+#include <stdio.h>
+
 
 int is_numeric(const char *str)
 {
@@ -75,8 +77,24 @@ int convert_to_ip(const char *host, char **ip)
 	}
 }
 
-inline unsigned short init_seqnum()
+inline uint16_t init_seqnum()
 {
 	srand(time(0));
-	return (unsigned short)rand() % 30720;
+	return (uint16_t)rand() % 30720;
+}
+
+void ushort_to_string(uint16_t *ushort, unsigned char *str)
+{
+	char lo = *ushort & 0xff;
+	char hi = *ushort >> 8;
+	
+	str[0] = hi;
+	str[1] = lo;
+}
+
+void string_to_ushort(unsigned char *str, uint16_t* ushort)
+{
+	char hi = str[0];
+	char lo = str[1];
+	*ushort =  lo | ((uint16_t)hi) << 8;
 }

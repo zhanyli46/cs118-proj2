@@ -2,8 +2,8 @@
 #include <stdlib.h>
 #include <netdb.h>
 #include <arpa/inet.h>
+#include <time.h>
 #include "util.h"
-#include <stdio.h>
 
 
 int is_numeric(const char *str)
@@ -44,7 +44,6 @@ int is_ip_format(const char *str)
 		tail = i;
 		memset(ipseg, 0, sizeof(ipseg));
 		strncpy(ipseg, &str[head], tail - head);
-		printf("%s\n", ipseg);
 		if (!is_numeric(ipseg)) 
 			return 0;
 		ipsegval = atoi(ipseg);
@@ -56,21 +55,28 @@ int is_ip_format(const char *str)
 	return 1;
 }
 
-int convert_to_ip(const char *host, char* ip)
+int convert_to_ip(const char *host, char **ip)
 {
+	struct hostent *hent;
+
 	if (is_ip_format(host)) {
-		ip = malloc(strlen(host));
-		strcpy(ip, host);
+		*ip = malloc(strlen(host));
+		strcpy(*ip, host);
 		return 1;
 	}
-	struct hostent *hent;
 	hent = gethostbyname(host);
 	if (hent == NULL) {
 		return 0;
 	} else {
 		struct in_addr **addr_list = (struct in_addr **)hent->h_addr_list;
-		ip = malloc(strlen(inet_ntoa(*addr_list[0])));
-		strcpy(ip, inet_ntoa(*addr_list[0]));
+		*ip = malloc(strlen(inet_ntoa(*addr_list[0])));
+		strcpy(*ip, inet_ntoa(*addr_list[0]));
 		return 1;
 	}
+}
+
+inline unsigned short init_seqnum()
+{
+	srand(time(0));
+	return (unsigned short)rand() % 30720;
 }

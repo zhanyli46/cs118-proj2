@@ -2,22 +2,25 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <netinet/in.h>
-#include <arpa/inet.h>
 #include <stdlib.h>
 #include <string.h>
+#include "helper.h"
 #include "util.h"
 
-#define BUFSIZE 1024
-
+#define INITRWND 30720
 
 int main(int argc, char **argv)
 {
 	int sockfd;
 	int exstat;
 	int inbytes, outbytes;
-	char inbuf[BUFSIZE], outbuf[BUFSIZE];
+	unsigned char inbuf[BUFSIZE], outbuf[BUFSIZE];
 	struct sockaddr_in servAddr, cliAddr;
 	socklen_t servAddrLen, cliAddrLen;
+	hostinfo_t hinfo;
+	char *ip;
+	tcpconst_t self, other;
+	uint16_t seq, ack;
 
 	// check program arguments
 	if (argc != 3) {
@@ -44,11 +47,15 @@ int main(int argc, char **argv)
 		return exstat;
 	}
 
-	// wait for a client to initiate three-way handshake
-	if ((inbytes = recv(sockfd, inbuf, BUFSIZE, 0) > 0)) {
-		fprintf(stdout, "%s\n", inbuf);
-	}
+	hinfo.sockfd = sockfd;
+	hinfo.addr = &cliAddr;
+	hinfo.addrlen = cliAddrLen;
+	self.rwnd = INITRWND;
 
+	// wait for a client to initiate three-way handshake
+	if (handshake_server(&hinfo, &self, &other) != 1) {
+		return 123;
+	}
 
 	return 0;
 }

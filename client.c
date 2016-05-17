@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <sys/socket.h>
-#include <arpa/inet.h>
 #include <stdlib.h>
 #include <string.h>
 #include "helper.h"
@@ -16,9 +15,11 @@ int main(int argc, char **argv)
 	int inbytes, outbytes;
 	struct sockaddr_in servAddr, cliAddr;
 	socklen_t servAddrLen, cliAddrLen;
+	hostinfo_t hinfo;
 	char *ip;
+	tcpconst_t self, other;
 	uint16_t seq, ack;
-	uint16_t rwnd = RWND;
+
 	// check program arguments
 	if (argc != 3) {
 		fprintf(stderr, "Usage: ./server SERVER-HOST-OR-IP PORT-NUMBER\n");
@@ -39,15 +40,20 @@ int main(int argc, char **argv)
 		return sockfd;
 	}
 
-	// set server location information
+	// set server location information and tcp header variables
 	servAddr.sin_family = AF_INET;
 	servAddr.sin_port = htons(atoi(argv[2]));
 	servAddr.sin_addr.s_addr = inet_addr(ip);
 	memset(servAddr.sin_zero, 0, 8);
 	servAddrLen = sizeof(servAddr);
 
+	hinfo.sockfd = sockfd;
+	hinfo.addr = &servAddr;
+	hinfo.addrlen = servAddrLen;
+	self.rwnd = RWND;
+
 	// set up handshake data
-	if (handshake_client(&seq, &ack, rwnd) != 1) {
+	if (handshake_client(&hinfo, &self, &other) != 1) {
 		fprintf(stderr, "Error: cannot set up a TCP-like connection\n");
 		return 1;
 	}

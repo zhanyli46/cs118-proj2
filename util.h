@@ -2,6 +2,7 @@
 #define _UTIL_H_
 
 #include <stdint.h>
+#include <arpa/inet.h>
 
 #define BUFSIZE 1024
 #define FIN 	0x1

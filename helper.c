@@ -10,15 +10,27 @@ int handshake_client(hostinfo_t *hinfo, tcpconst_t *self, tcpconst_t *other)
 	uint16_t flag;
 	ssize_t outbytes;
 
+	// specify TCP-like connection information
 	memset(packet, 0, BUFSIZE);
 	self->seq = init_seqnum();
 	self->ack = 0;
 	flag = SYN;
+
 	fill_header(packet, &self->seq, &self->ack, &self->rwnd, &flag);
+	
+	// testing
+	printf("self: %hu %hu %hu %hu\n", self->seq, self->ack, self->rwnd, flag);
+	int i;
+	for (i = 0; i < 8; i++) {
+		printf("%.2x", packet[i]);
+	}
+	printf("\n");
+	// testing
 
-
+	// send SYN with sequence number
 	if ((outbytes = sendto(hinfo->sockfd, packet, BUFSIZE, 0, (struct sockaddr *)hinfo->addr, hinfo->addrlen)) < 0)
 		return 0;
+
 
 	
 	return 0;
@@ -29,15 +41,22 @@ int handshake_server(hostinfo_t *hinfo, tcpconst_t *self, tcpconst_t *other)
 	unsigned char packet[BUFSIZE];
 	uint16_t flag;
 	ssize_t inbytes;
-	printf("inhandshakeserverif\n");
+
+	memset(packet, 0, BUFSIZE);
+	self->seq = init_seqnum();
+
 	if ((inbytes = recvfrom(hinfo->sockfd, packet, BUFSIZE, 0, (struct sockaddr *)hinfo->addr, &hinfo->addrlen) > 0)) {
+		interpret_header(packet, &other->seq, &other->ack, &other->rwnd, &flag);
 		
+		// testing	
+		printf("other: %hu %hu %hu %hu\n", other->seq, other->ack, other->rwnd, flag);
 		int i;
-		for (i = 0; i < BUFSIZE; i++) {
-			if (i % 8 == 0)
-				printf("\n");
+		for (i = 0; i < 8; i++) {
 			printf("%.2x", packet[i]);
 		}
+		printf("\n");
+		// testing
+	
 	}
 	return 0;
 }
@@ -65,14 +84,21 @@ void fill_header(unsigned char *p, uint16_t *seq, uint16_t *ack, uint16_t *rwnd,
 
 void interpret_header(unsigned char *p, uint16_t *seq, uint16_t *ack, uint16_t *rwnd, uint16_t *flag)
 {
-	memcpy(seq, p, 1);
-	memcpy(seq+1, p+1, 1);
-	memcpy(ack, p+2, 1);
-	memcpy(ack+1, p+3, 1);
-	memcpy(rwnd, p+4, 1);
-	memcpy(rwnd+1, p+5, 1);
-	memcpy(flag, p+6, 1);
-	memcpy(flag+1, p+7, 1);
+	unsigned char sseq[2], sack[2], srwnd[2], sflag[2];
+	memcpy(sseq, p, 1);
+	memcpy(sseq+1, p+1, 1);
+	memcpy(sack, p+2, 1);
+	memcpy(sack+1, p+3, 1);
+	memcpy(srwnd, p+4, 1);
+	memcpy(srwnd+1, p+5, 1);
+	memcpy(sflag, p+6, 1);
+	memcpy(sflag+1, p+7, 1);
+	
+
+	string_to_ushort(sseq, seq);
+	string_to_ushort(sack, ack);
+	string_to_ushort(srwnd, rwnd);
+	string_to_ushort(sflag, flag);
 
 	return;
 }

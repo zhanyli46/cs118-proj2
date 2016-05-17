@@ -85,8 +85,8 @@ inline uint16_t init_seqnum()
 
 void ushort_to_string(uint16_t *ushort, unsigned char *str)
 {
-	char lo = *ushort & 0xff;
-	char hi = *ushort >> 8;
+	unsigned char lo = *ushort & 0xff;
+	unsigned char hi = *ushort >> 8;
 	
 	str[0] = hi;
 	str[1] = lo;
@@ -94,7 +94,7 @@ void ushort_to_string(uint16_t *ushort, unsigned char *str)
 
 void string_to_ushort(unsigned char *str, uint16_t* ushort)
 {
-	char hi = str[0];
-	char lo = str[1];
+	unsigned char hi = str[0];
+	unsigned char lo = str[1];
 	*ushort =  lo | ((uint16_t)hi) << 8;
 }

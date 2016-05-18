@@ -14,12 +14,11 @@ int main(int argc, char **argv)
 	int sockfd;
 	int exstat;
 	int inbytes, outbytes;
-	unsigned char inbuf[BUFSIZE], outbuf[BUFSIZE];
 	struct sockaddr_in servAddr, cliAddr;
 	socklen_t servAddrLen, cliAddrLen;
 	hostinfo_t hinfo;
 	char *ip;
-	tcpconst_t self, other;
+	conninfo_t self, other;
 	uint16_t seq, ack;
 
 	// check program arguments
@@ -54,8 +53,9 @@ int main(int argc, char **argv)
 
 	// wait for a client to initiate three-way handshake
 	if (handshake_server(&hinfo, &self, &other) != 1) {
-		return 123;
+		fprintf(stderr, "Error: cannot set up a TCP-like connection\n");
+		return 1;
 	}
 
-	return 0;
+	return 123;
 }

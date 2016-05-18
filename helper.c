@@ -4,65 +4,92 @@
 
 #include <stdio.h>
 
-int handshake_client(hostinfo_t *hinfo, tcpconst_t *self, tcpconst_t *other)
+int handshake_client(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
 {	
-	unsigned char packet[BUFSIZE];
-	uint16_t flag;
-	ssize_t outbytes;
+	unsigned char packet[PACKSIZE];
+	ssize_t inbytes, outbytes;
 
-	// specify TCP-like connection information
-	memset(packet, 0, BUFSIZE);
+	// set connection parameters
 	self->seq = init_seqnum();
 	self->ack = 0;
-	flag = SYN;
+	self->flag = SYN;
 
-	fill_header(packet, &self->seq, &self->ack, &self->rwnd, &flag);
-	
-	// testing
-	printf("self: %hu %hu %hu %hu\n", self->seq, self->ack, self->rwnd, flag);
-	int i;
-	for (i = 0; i < 8; i++) {
-		printf("%.2x", packet[i]);
-	}
-	printf("\n");
-	// testing
-
-	// send SYN with sequence number
-	if ((outbytes = sendto(hinfo->sockfd, packet, BUFSIZE, 0, (struct sockaddr *)hinfo->addr, hinfo->addrlen)) < 0)
+	// send SYN + sequence number
+	if ((outbytes = send_packet(packet, hinfo, self, other)) < 0)
 		return 0;
 
-
-	
-	return 0;
-}
-
-int handshake_server(hostinfo_t *hinfo, tcpconst_t *self, tcpconst_t *other)
-{
-	unsigned char packet[BUFSIZE];
-	uint16_t flag;
-	ssize_t inbytes;
-
-	memset(packet, 0, BUFSIZE);
-	self->seq = init_seqnum();
-
-	if ((inbytes = recvfrom(hinfo->sockfd, packet, BUFSIZE, 0, (struct sockaddr *)hinfo->addr, &hinfo->addrlen) > 0)) {
-		interpret_header(packet, &other->seq, &other->ack, &other->rwnd, &flag);
-		
-		// testing	
-		printf("other: %hu %hu %hu %hu\n", other->seq, other->ack, other->rwnd, flag);
-		int i;
-		for (i = 0; i < 8; i++) {
-			printf("%.2x", packet[i]);
-		}
-		printf("\n");
-		// testing
-	
+	// recv packet and check flag (SYN + ACK)
+	while ((inbytes = recv_packet(packet, hinfo, self, other)) >= 0) {
+		if (inbytes < 0)
+			return 0;
+		if (other->flag & (SYN | ACK))
+			break;
+		else 
+			continue;
 	}
-	return 0;
+
+	// set connection parameters
+	self->flag = ACK;
+	self->ack = other->seq;
+
+	// send ACK
+	if ((outbytes = send_packet(packet, hinfo, self, other)) < 0)
+		return 0;
+	
+	return 1;
+}
+
+int handshake_server(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
+{
+	unsigned char packet[PACKSIZE];
+	ssize_t inbytes, outbytes;
+
+	self->seq = init_seqnum();
+	self->ack = 0;
+	self->flag = 0;
+
+START:
+	// recv for the first time, expecting SYN; store client information in hinfo
+	memset(packet, 0, PACKSIZE);
+	while ((inbytes = recvfrom(hinfo->sockfd, packet, PACKSIZE, 0, (struct sockaddr *)hinfo->addr, &hinfo->addrlen) >= 0)) {
+		interpret_header(packet, &other->seq, &other->ack, &other->rwnd, &other->flag);
+		
+		printf("receiving packet:\n");
+		printf("other: %hu %hu %hu %hu\n", other->seq, other->ack, other->rwnd, other->flag);
+
+		if (other->flag & SYN)
+			// received SYN (TCP-like connection initiation)
+			break;
+		else
+			// unknown flag, ignore packet
+			continue;
+	}
+	if (inbytes < 0)
+		return 0;
+
+	//set connection parameters
+	self->flag = SYN | ACK;
+	self->ack = other->seq;
+	
+	// send SYN + ACK
+	if ((outbytes = send_packet(packet, hinfo, self, other)) < 0)
+		goto START;
+	
+	// recv packet and check flag (ACK)
+	while ((inbytes = recv_packet(packet, hinfo, self, other)) >= 0) {
+		if (inbytes < 0)
+			return 0;
+		if (other->flag & ACK)
+			break;
+		else 
+			continue;
+	}
+
+	return 1;
 }
 
 
-void fill_header(unsigned char *p, uint16_t *seq, uint16_t *ack, uint16_t *rwnd, uint16_t *flag)
+static void fill_header(unsigned char *p, uint16_t *seq, uint16_t *ack, uint16_t *rwnd, uint16_t *flag)
 {
 	unsigned char sseq[2], sack[2], srwnd[2], sflag[2];
 	ushort_to_string(seq, sseq);
@@ -82,7 +109,7 @@ void fill_header(unsigned char *p, uint16_t *seq, uint16_t *ack, uint16_t *rwnd,
 	return;
 }
 
-void interpret_header(unsigned char *p, uint16_t *seq, uint16_t *ack, uint16_t *rwnd, uint16_t *flag)
+static void interpret_header(unsigned char *p, uint16_t *seq, uint16_t *ack, uint16_t *rwnd, uint16_t *flag)
 {
 	unsigned char sseq[2], sack[2], srwnd[2], sflag[2];
 	memcpy(sseq, p, 1);
@@ -101,4 +128,33 @@ void interpret_header(unsigned char *p, uint16_t *seq, uint16_t *ack, uint16_t *
 	string_to_ushort(sflag, flag);
 
 	return;
+}
+
+static ssize_t send_packet(unsigned char* packet, hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
+{
+	ssize_t	outbytes;
+	memset(packet, 0, PACKSIZE);
+	fill_header(packet, &self->seq, &self->ack, &self->rwnd, &self->flag);
+	
+	printf("sending packet:\n");
+	printf("self: %hu %hu %hu %hu\n", self->seq, self->ack, self->rwnd, self->flag);
+
+	if ((outbytes = sendto(hinfo->sockfd, packet, PACKSIZE, 0, (struct sockaddr *)hinfo->addr, hinfo->addrlen)) < 0)
+		return outbytes;
+
+	return outbytes;
+}
+
+static ssize_t recv_packet(unsigned char* packet, hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
+{
+	ssize_t inbytes;
+	memset(packet, 0, PACKSIZE);
+	if ((inbytes = recv(hinfo->sockfd, packet, PACKSIZE, 0)) >= 0) {
+		interpret_header(packet, &other->seq, &other->ack, &other->rwnd, &other->flag);
+
+		printf("receiving packet:\n");
+		printf("other: %hu %hu %hu %hu\n", other->seq, other->ack, other->rwnd, other->flag);
+	}
+	return inbytes;
+	
 }

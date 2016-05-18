@@ -9,15 +9,19 @@ typedef struct hostinfo {
 	socklen_t addrlen;
 } hostinfo_t;
 
-typedef struct tcpconst {
+typedef struct conninfo {
 	uint16_t seq;
 	uint16_t ack;
 	uint16_t rwnd;
-} tcpconst_t;
+	uint16_t flag;
+} conninfo_t;
 
-int handshake_client(hostinfo_t *hinfo, tcpconst_t *self, tcpconst_t *other);
-int handshake_server(hostinfo_t *hinfo, tcpconst_t *self, tcpconst_t *other);
-void fill_header(unsigned char *p, uint16_t *seq, uint16_t *ack, uint16_t *rwnd, uint16_t *flag);
-void interpret_header(unsigned char *p, uint16_t *seq, uint16_t *ack, uint16_t *rwnd, uint16_t *flag);
+int handshake_client(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other);
+int handshake_server(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other);
+
+static void fill_header(unsigned char *p, uint16_t *seq, uint16_t *ack, uint16_t *rwnd, uint16_t *flag);
+static void interpret_header(unsigned char *p, uint16_t *seq, uint16_t *ack, uint16_t *rwnd, uint16_t *flag);
+static ssize_t send_packet(unsigned char* packet, hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other);
+static ssize_t recv_packet(unsigned char* packet, hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other);
 
 #endif

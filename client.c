@@ -17,7 +17,7 @@ int main(int argc, char **argv)
 	socklen_t servAddrLen, cliAddrLen;
 	hostinfo_t hinfo;
 	char *ip;
-	tcpconst_t self, other;
+	conninfo_t self, other;
 	uint16_t seq, ack;
 
 	// check program arguments
@@ -59,5 +59,5 @@ int main(int argc, char **argv)
 	}
 
 
-	return 0;
+	return 213;
 }

@@ -5,7 +5,6 @@
 #include <time.h>
 #include "util.h"
 
-#include <stdio.h>
 
 
 int is_numeric(const char *str)

@@ -2,10 +2,9 @@
 #include <sys/socket.h>
 #include <stdlib.h>
 #include <string.h>
+#include "handshake.h"
 #include "helper.h"
 #include "util.h"
-
-#define RWND 30720
 
 
 int main(int argc, char **argv)
@@ -50,13 +49,15 @@ int main(int argc, char **argv)
 	hinfo.sockfd = sockfd;
 	hinfo.addr = &servAddr;
 	hinfo.addrlen = servAddrLen;
-	self.rwnd = RWND;
+	self.rwnd = INITRWND;
 
 	// set up handshake data
-	if (handshake_client(&hinfo, &self, &other) != 1) {
+	if (handshake_client(&hinfo, &self, &other)) {
 		fprintf(stderr, "Error: cannot set up a TCP-like connection\n");
 		return 1;
 	}
+
+	// wait for data
 
 
 	return 213;

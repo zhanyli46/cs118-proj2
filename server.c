@@ -4,14 +4,16 @@
 #include <netinet/in.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
+#include "handshake.h"
+#include "ftransfer.h"
 #include "helper.h"
 #include "util.h"
 
-#define INITRWND 30720
 
 int main(int argc, char **argv)
 {
-	int sockfd;
+	int sockfd, filefd;
 	int exstat;
 	int inbytes, outbytes;
 	struct sockaddr_in servAddr, cliAddr;
@@ -52,9 +54,20 @@ int main(int argc, char **argv)
 	self.rwnd = INITRWND;
 
 	// wait for a client to initiate three-way handshake
-	if (handshake_server(&hinfo, &self, &other) != 1) {
+	if (handshake_server(&hinfo, &self, &other)) {
 		fprintf(stderr, "Error: cannot set up a TCP-like connection\n");
 		return 1;
+	}
+
+	// prepare to send the file
+	if ((filefd = open(argv[2], O_RDONLY)) < 0) {
+		fprintf(stderr, "Error: cannot open file '%s'\n", argv[2]);
+		return 1;
+	}
+
+	if (ftransfer_sender(&hinfo, filefd, &self, &other) < 0) {
+		fprintf(stderr, "Error transfering file, exiting.\n");
+		return 233;
 	}
 
 	return 123;

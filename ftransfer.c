@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <unistd.h>
+#include <string.h>
 #include "ftransfer.h"
 #include <stdio.h>
 
@@ -11,9 +12,10 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, conninfo_t *self, conninfo_t
 	unsigned limit;								// the smaller of swnd and cwnd
 	unsigned packind;							// packet index
 	wnditem_t *witems;							// elements in a window
-	char packet[PACKSIZE];						// a packet including header and data
-	uint16_t nextseq;							// sequence number for next packet
+	unsigned char packet[PACKSIZE];				// a packet including header and data
+	uint16_t nextseq = self->seq;				// sequence number for next packet
 	int end = 0;								// termination boolean
+	unsigned head = 0, tail;
 	int i;
 
 	witems = calloc(swnd, sizeof(wnditem_t));
@@ -25,11 +27,26 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, conninfo_t *self, conninfo_t
 
 	while (!end) {
 		limit = (swnd < cwnd) ? swnd : cwnd;
+		tail = (head + limit) % swnd;
+
 		for (packind = 0; packind < limit; ) {
 			if (witems[packind].stat == PACK_UNSENT) {
+				memset(packet, 0, PACKSIZE);
 				// set timer and send packet
 				if (readdata(filefd, &witems[packind])) {
-
+					witems[packind].seq = nextseq;
+					self->seq = nextseq;
+					nextseq += witems[packind].datalen;
+					self->ack = 0;
+					self->flag = witems[packind].datalen << 3;
+					memcpy(packet + HEADERSIZE, witems[packind].data, witems[packind].datalen);
+					gettimeofday(&witems[packind].tv, NULL);
+					if (send_packet(packet, hinfo, self, other) < 0) {
+						fprintf(stderr, "Error sending packet\n");
+						exit(1);
+					}
+					witems[packind].stat = PACK_SENT;
+				
 				} else {
 
 				}

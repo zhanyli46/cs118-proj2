@@ -50,7 +50,6 @@ void interpret_header(unsigned char *p, uint16_t *seq, uint16_t *ack, uint16_t *
 ssize_t send_packet(unsigned char* packet, hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
 {
 	ssize_t	outbytes;
-	memset(packet, 0, PACKSIZE);
 	fill_header(packet, &self->seq, &self->ack, &self->rwnd, &self->flag);
 	
 	printf("sending packet:\n");
@@ -65,7 +64,6 @@ ssize_t send_packet(unsigned char* packet, hostinfo_t *hinfo, conninfo_t *self, 
 ssize_t recv_packet(unsigned char* packet, hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
 {
 	ssize_t inbytes;
-	memset(packet, 0, PACKSIZE);
 	if ((inbytes = recv(hinfo->sockfd, packet, PACKSIZE, 0)) >= 0) {
 		interpret_header(packet, &other->seq, &other->ack, &other->rwnd, &other->flag);
 

@@ -29,3 +29,5 @@ util.o: util.c
 
 clean:
 	rm -rf *.o server client
+
+.PHONY: server client *.o

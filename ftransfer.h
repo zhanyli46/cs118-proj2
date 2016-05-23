@@ -12,7 +12,7 @@ typedef struct {
 	uint16_t seq;
 	packstat_t stat;
 	struct timeval tv;
-	char data[DATASIZE];
+	unsigned char data[DATASIZE];
 	uint16_t datalen;
 } wnditem_t;
 

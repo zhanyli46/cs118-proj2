@@ -6,6 +6,7 @@
 
 #define PACKSIZE	1032
 #define DATASIZE	1024
+#define HEADERSIZE	PACKSIZE-DATASIZE
 #define FIN			0x1
 #define SYN 		0x2
 #define	ACK			0x4

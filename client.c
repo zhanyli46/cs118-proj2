@@ -57,8 +57,21 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
+	unsigned char buf[1032];
 	// wait for data
-
+	while (recv(sockfd, buf, 1032, 0) < 0) {
+		int i;
+		for (i = 0; i < 8; i++) {
+			printf("%.2x", buf[i]);
+		}
+		printf("\n");
+		for (i = 0; i < 1024; i++) {
+			if (i != 0 && i % 16 == 0)
+				printf("\n");
+			printf("%.2x\n", buf[i+8]);
+		}
+		printf("\n");
+	}
 
 	return 213;
 }

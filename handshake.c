@@ -6,6 +6,7 @@ int handshake_client(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
 {	
 	unsigned char packet[PACKSIZE];
 	ssize_t inbytes, outbytes;
+	uint16_t nextseq;
 
 	// set connection parameters
 	self->seq = init_seqnum();
@@ -20,15 +21,18 @@ int handshake_client(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
 	while ((inbytes = recv_packet(packet, hinfo, self, other)) >= 0) {
 		if (inbytes < 0)
 			return -1;
-		if (other->flag & (SYN | ACK))
+		if ((other->flag & (SYN | ACK))) {
+			nextseq = other->seq + 1;
 			break;
-		else 
+		} else { 
 			continue;
+		}
 	}
 
 	// set connection parameters
+	self->seq += 1;
 	self->flag = ACK;
-	self->ack = other->seq;
+	self->ack = nextseq;
 
 	// send ACK
 	if ((outbytes = send_packet(packet, hinfo, self, other)) < 0)
@@ -41,6 +45,7 @@ int handshake_server(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
 {
 	unsigned char packet[PACKSIZE];
 	ssize_t inbytes, outbytes;
+	uint16_t nextseq;
 
 	self->seq = init_seqnum();
 	self->ack = 0;
@@ -55,19 +60,21 @@ START:
 		printf("receiving packet:\n");
 		printf("other: %hu %hu %hu %hu\n", other->seq, other->ack, other->rwnd, other->flag);
 
-		if (other->flag & SYN)
+		if (other->flag & SYN) {
 			// received SYN (TCP-like connection initiation)
+			nextseq = other->seq + 1;
 			break;
-		else
+		} else {
 			// unknown flag, ignore packet
 			continue;
+		}
 	}
 	if (inbytes < 0)
 		return -1;
 
 	//set connection parameters
 	self->flag = SYN | ACK;
-	self->ack = other->seq;
+	self->ack = nextseq;
 	
 	// send SYN + ACK
 	if ((outbytes = send_packet(packet, hinfo, self, other)) < 0)
@@ -77,11 +84,11 @@ START:
 	while ((inbytes = recv_packet(packet, hinfo, self, other)) >= 0) {
 		if (inbytes < 0)
 			return -1;
-		if (other->flag & ACK)
+		if ((other->flag & ACK) && (other->seq == nextseq))
 			break;
 		else 
 			continue;
 	}
-
+	self->seq += 1;
 	return 0;
 }

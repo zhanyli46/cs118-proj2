@@ -14,12 +14,12 @@ int handshake_client(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
 
 	// send SYN + sequence number
 	if ((outbytes = send_packet(packet, hinfo, self, other)) < 0)
-		return 1;
+		return -1;
 
 	// recv packet and check flag (SYN + ACK)
 	while ((inbytes = recv_packet(packet, hinfo, self, other)) >= 0) {
 		if (inbytes < 0)
-			return 1;
+			return -1;
 		if (other->flag & (SYN | ACK))
 			break;
 		else 
@@ -32,7 +32,7 @@ int handshake_client(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
 
 	// send ACK
 	if ((outbytes = send_packet(packet, hinfo, self, other)) < 0)
-		return 1;
+		return -1;
 	
 	return 0;
 }
@@ -63,7 +63,7 @@ START:
 			continue;
 	}
 	if (inbytes < 0)
-		return 1;
+		return -1;
 
 	//set connection parameters
 	self->flag = SYN | ACK;
@@ -76,7 +76,7 @@ START:
 	// recv packet and check flag (ACK)
 	while ((inbytes = recv_packet(packet, hinfo, self, other)) >= 0) {
 		if (inbytes < 0)
-			return 1;
+			return -1;
 		if (other->flag & ACK)
 			break;
 		else 

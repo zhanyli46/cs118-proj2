@@ -5,8 +5,7 @@
 #include <arpa/inet.h>
 
 #define PACKSIZE	1032
-#define HEADERSIZE	8
-#define DATASIZE	PACKSIZE-HEADERSIZE
+#define DATASIZE	1024
 #define FIN			0x1
 #define SYN 		0x2
 #define	ACK			0x4

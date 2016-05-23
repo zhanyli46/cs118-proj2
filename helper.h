@@ -3,13 +3,13 @@
 
 #include "util.h"
 
-typedef struct hostinfo {
+typedef struct {
 	int sockfd;
 	struct sockaddr_in *addr;
 	socklen_t addrlen;
 } hostinfo_t;
 
-typedef struct conninfo {
+typedef struct {
 	uint16_t seq;
 	uint16_t ack;
 	uint16_t rwnd;

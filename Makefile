@@ -10,13 +10,13 @@ client: client.o ftransfer.o handshake.o helper.o util.o
 	$(CC) $(CFLAGS) client.o ftransfer.o handshake.o helper.o util.o -o client
 
 server.o: server.c
-	$(CC) $(CFLAGS) -c server.c
+	$(CC) $(CFLAGS) server.c -c
 
 client.o: client.c
 	$(CC) $(CFLAGS) client.c -c
 
 ftransfer.o: ftransfer.c
-	$(CC) $(CFLAGS) ftransfer.c -c
+	$(CC) $(CFLAGS) -pthread ftransfer.c -c
 
 handshake.o: handshake.c
 	$(CC) $(CFLAGS) handshake.c -c

@@ -11,7 +11,7 @@
 #define SYN 		0x2
 #define	ACK			0x4
 #define MAXSEQNUM	30720
-#define TIMEOUT		500
+#define TIMEOUT		500			// milliseconds
 #define INITRWND 	30720
 
 int is_numeric(const char *str);

@@ -70,6 +70,6 @@ ssize_t recv_packet(unsigned char* packet, hostinfo_t *hinfo, conninfo_t *self, 
 		printf("receiving packet:\n");
 		printf("other: %hu %hu %hu %hu\n", other->seq, other->ack, other->rwnd, other->flag);
 	}
+
 	return inbytes;
-	
 }

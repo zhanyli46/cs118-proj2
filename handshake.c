@@ -14,6 +14,7 @@ int handshake_client(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
 	self->flag = SYN;
 
 	// send SYN + sequence number
+	fprintf(stdout, "Sending SYN packet\n");
 	if ((outbytes = send_packet(packet, hinfo, self, other)) < 0)
 		return -1;
 
@@ -22,6 +23,7 @@ int handshake_client(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
 		if (inbytes < 0)
 			return -1;
 		if ((other->flag & (SYN | ACK))) {
+			fprintf(stdout, "Receiving SYN/ACK packet\n");
 			nextseq = other->seq + 1;
 			break;
 		} else { 
@@ -35,9 +37,9 @@ int handshake_client(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
 	self->ack = nextseq;
 
 	// send ACK
+	fprintf(stdout, "Sending ACK packet\n");
 	if ((outbytes = send_packet(packet, hinfo, self, other)) < 0)
 		return -1;
-	
 	return 0;
 }
 
@@ -57,11 +59,9 @@ START:
 	while ((inbytes = recvfrom(hinfo->sockfd, packet, PACKSIZE, 0, (struct sockaddr *)hinfo->addr, &hinfo->addrlen) >= 0)) {
 		interpret_header(packet, &other->seq, &other->ack, &other->rwnd, &other->flag);
 		
-		printf("receiving packet:\n");
-		printf("other: %hu %hu %hu %hu\n", other->seq, other->ack, other->rwnd, other->flag);
-
 		if (other->flag & SYN) {
 			// received SYN (TCP-like connection initiation)
+			fprintf(stdout, "Receiving SYN packet\n");
 			nextseq = other->seq + 1;
 			break;
 		} else {
@@ -77,6 +77,7 @@ START:
 	self->ack = nextseq;
 	
 	// send SYN + ACK
+	fprintf(stdout, "Sending SYN/ACK packet\n");
 	if ((outbytes = send_packet(packet, hinfo, self, other)) < 0)
 		goto START;
 	
@@ -84,10 +85,12 @@ START:
 	while ((inbytes = recv_packet(packet, hinfo, self, other)) >= 0) {
 		if (inbytes < 0)
 			return -1;
-		if ((other->flag & ACK) && (other->seq == nextseq))
+		if ((other->flag & ACK) && (other->seq == nextseq)) {
+			fprintf(stdout, "Receiving ACK packet\n");
 			break;
-		else 
+		} else { 
 			continue;
+		}
 	}
 	self->seq += 1;
 	return 0;

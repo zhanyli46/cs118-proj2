@@ -2,8 +2,6 @@
 #include "helper.h"
 #include "util.h"
 
-#include <stdio.h>
-
 
 
 void fill_header(unsigned char *p, uint16_t *seq, uint16_t *ack, uint16_t *rwnd, uint16_t *flag)
@@ -51,9 +49,6 @@ ssize_t send_packet(unsigned char* packet, hostinfo_t *hinfo, conninfo_t *self, 
 {
 	ssize_t	outbytes;
 	fill_header(packet, &self->seq, &self->ack, &self->rwnd, &self->flag);
-	
-	printf("sending packet:\n");
-	printf("self: %hu %hu %hu %hu\n", self->seq, self->ack, self->rwnd, self->flag);
 
 	if ((outbytes = sendto(hinfo->sockfd, packet, PACKSIZE, 0, (struct sockaddr *)hinfo->addr, hinfo->addrlen)) < 0)
 		return outbytes;
@@ -66,9 +61,6 @@ ssize_t recv_packet(unsigned char* packet, hostinfo_t *hinfo, conninfo_t *self, 
 	ssize_t inbytes;
 	if ((inbytes = recv(hinfo->sockfd, packet, PACKSIZE, 0)) >= 0) {
 		interpret_header(packet, &other->seq, &other->ack, &other->rwnd, &other->flag);
-
-		printf("receiving packet:\n");
-		printf("other: %hu %hu %hu %hu\n", other->seq, other->ack, other->rwnd, other->flag);
 	}
 
 	return inbytes;

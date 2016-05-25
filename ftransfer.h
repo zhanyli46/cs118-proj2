@@ -24,6 +24,7 @@ typedef struct {
 	wnditem_t *witems;
 	unsigned *wsize;
 	unsigned *cwnd;
+	unsigned *ssthresh;
 	unsigned *head;
 	unsigned *tail;
 	wnditem_t *lastpack;

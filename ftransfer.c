@@ -8,8 +8,9 @@
 int ftransfer_sender(hostinfo_t *hinfo, int filefd, conninfo_t *self, conninfo_t *other)
 {
 	// set send window corresponding to the receiver's window size
-	unsigned wsize = other->rwnd / PACKSIZE;		// receiver window size
+	unsigned wsize = other->rwnd / PACKSIZE;	// receiver window size
 	unsigned cwnd = 1;							// congestion window size
+	unsigned ssthresh = INITSSTHRESH;			// ssthresh value
 	unsigned limit;								// the smaller of wsize and cwnd
 	wnditem_t *witems;							// elements in a window
 	wnditem_t lastpack;
@@ -37,6 +38,7 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, conninfo_t *self, conninfo_t
 	ud.thrdstop = &thrdstop;
 	ud.witems = witems;
 	ud.cwnd = &cwnd;
+	ud.ssthresh = &ssthresh;
 	ud.wsize = &wsize;
 	ud.head = &head;
 	ud.tail = &tail;
@@ -68,6 +70,8 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, conninfo_t *self, conninfo_t
 					self->ack = 0;
 					self->flag = witems[i].datalen << 3;
 					memcpy(packet + HEADERSIZE, witems[i].data, witems[i].datalen);
+					fprintf(stdout, "Sending data packet %hu %u %u\n", 
+						self->seq, cwnd * PACKSIZE, ssthresh * PACKSIZE);
 					gettimeofday(&witems[i].tv, NULL);
 					if (send_packet(packet, hinfo, self, other) < 0) {
 						fprintf(stderr, "Error sending packets\n");
@@ -77,12 +81,11 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, conninfo_t *self, conninfo_t
 					witems[i].stat = PACK_SENT;
 				} else {
 					nodata = 1;
-					goto CHECK;
 				}
 			}
 		}
 
-		// SENT (check timer for each sent packet)
+		// SENT (check timer for each sent packet for retransmission)
 		for (i = head; i != tail; i = (i + 1) % wsize) {
 			gettimeofday(&now, NULL);
 			long deltausec = now.tv_usec - witems[i].tv.tv_usec;
@@ -92,6 +95,8 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, conninfo_t *self, conninfo_t
 				self->ack = 0;
 				self->flag = witems[i].datalen << 3;
 				memcpy(packet + HEADERSIZE, witems[i].data, witems[i].datalen);
+				fprintf(stdout, "Sending data packet %hu %u %u Retransmission\n", 
+						self->seq, cwnd * PACKSIZE, ssthresh * PACKSIZE);
 				gettimeofday(&witems[i].tv, NULL);
 				if (send_packet(packet, hinfo, self, other) < 0) {
 					fprintf(stderr, "Error sending packets\n");
@@ -100,7 +105,7 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, conninfo_t *self, conninfo_t
 			}
 		}
 
-		// ACKED (move window frame and check for duplicate ACKs)
+		// ACKED (move window frame)
 		for (i = head; i != tail; i = (i + 1) % wsize) {
 			if (witems[i].stat == PACK_ACKED) {
 				memset(&(witems[i].tv), 0, sizeof(struct timeval));
@@ -110,12 +115,26 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, conninfo_t *self, conninfo_t
 			}
 		}
 
-	CHECK:
+		//  check for duplicate ACKs and retransmission
+		if (nacked >= 3) {
+			self->seq = lastpack.seq;
+			self->ack = 0;
+			self->flag = lastpack.datalen << 3;
+			memcpy(packet + HEADERSIZE, lastpack.data, lastpack.datalen);
+			fprintf(stdout, "Sending data packet %hu %u %u Retransmission\n", 
+						self->seq, cwnd * PACKSIZE, ssthresh * PACKSIZE);
+			gettimeofday(&lastpack.tv, NULL);
+			if (send_packet(packet, hinfo, self, other) < 0) {
+				fprintf(stderr, "Error sending packets\n");
+				exit(1);
+			}
+		}
+
 		end = nodata && (nsent == 0);
 		break;
 	}
 
-	return -1;
+	return 0;
 }
 
 int ftransfer_recver(hostinfo_t *hinfo, int filefd, conninfo_t *self, conninfo_t *other)
@@ -152,21 +171,31 @@ static void *recv_ack(void *userdata)
 		} else {
 			// if received duplicated ACK
 			if (ud->other->ack == ud->lastpack->seq + ud->lastpack->datalen) {
+				fprintf(stdout, "Receiving ACK packet %hu\n", ud->other->ack);
 				*ud->nacked += 1;
-				*ud->wsize = ud->other->rwnd;
-				*ud->cwnd *= 2;
+				*ud->wsize = ud->other->rwnd / PACKSIZE;
+				if (*ud->cwnd < *ud->ssthresh) {
+					*ud->cwnd *= 2;
+				} else {
+					*ud->cwnd += 1;
+				}
 				if (*ud->cwnd > *ud->wsize)
 					*ud->cwnd = *ud->wsize;
 				continue;
 			}
 			// if received different ACK
 			for (i = *ud->head; i != *ud->tail; i = (i + 1) % *ud->wsize) {
+				fprintf(stdout, "Receiving ACK packet %hu\n", ud->other->ack);
 				if (ud->other->ack == (ud->witems)[i].seq + (ud->witems[i].datalen)) {
 					// all packets before this ACK have been received
 					for (j = *ud->head; j != i; j = (j + 1) % *ud->wsize)
 						(ud->witems)[j].stat = PACK_ACKED;
-					*ud->wsize = ud->other->rwnd;
-					*ud->cwnd *= 2;
+					*ud->wsize = ud->other->rwnd / PACKSIZE;
+					if (*ud->cwnd < *ud->ssthresh) {
+						*ud->cwnd *= 2;
+					} else {
+						*ud->cwnd += 1;
+					}
 					if (*ud->cwnd > *ud->wsize)
 						*ud->cwnd = *ud->wsize;
 					// mark this ACK as the last received packet

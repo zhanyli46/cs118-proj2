@@ -12,8 +12,8 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, conninfo_t *self, conninfo_t
 	unsigned cwnd = 1;							// congestion window size
 	unsigned ssthresh = INITSSTHRESH;			// ssthresh value
 	unsigned limit;								// the smaller of wsize and cwnd
-	wnditem_t *witems;							// elements in a window
-	wnditem_t lastpack;
+	swnditem_t *witems;							// elements in a window
+	swnditem_t lastpack;
 	int nacked;
 	unsigned char packet[PACKSIZE];				// a packet including header and data
 	uint16_t nextseq = self->seq;				// sequence number for next packet
@@ -25,7 +25,7 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, conninfo_t *self, conninfo_t
 	unsigned i;
 	struct timeval now;
 
-	witems = calloc(wsize, sizeof(wnditem_t));
+	witems = calloc(wsize, sizeof(swnditem_t));
 	for (i = 0; i < wsize; i++) {
 		witems[i].seq = 0;
 		witems[i].stat = PACK_UNSENT;
@@ -91,6 +91,7 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, conninfo_t *self, conninfo_t
 			long deltausec = now.tv_usec - witems[i].tv.tv_usec;
 			int deltasec = now.tv_sec - witems[i].tv.tv_sec;
 			if (deltasec > 0 || deltausec > TIMEOUT * 1000) {
+				cwnd = 1;
 				self->seq = witems[i].seq;
 				self->ack = 0;
 				self->flag = witems[i].datalen << 3;
@@ -111,6 +112,7 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, conninfo_t *self, conninfo_t
 				memset(&(witems[i].tv), 0, sizeof(struct timeval));
 				memset(witems[i].data, 0, DATASIZE);
 				witems[i].stat = PACK_UNSENT;
+				nsent--;
 				head = (head + 1) % wsize;
 			}
 		}
@@ -131,18 +133,88 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, conninfo_t *self, conninfo_t
 		}
 
 		end = nodata && (nsent == 0);
-		break;
 	}
+
+	// terminate connection (FIN)
 
 	return 0;
 }
 
 int ftransfer_recver(hostinfo_t *hinfo, int filefd, conninfo_t *self, conninfo_t *other)
 {
+	unsigned wsize = self->rwnd / PACKSIZE;
+	rwnditem_t *witems;
+	unsigned char packet[PACKSIZE];
+	uint16_t nextseq = self->ack;
+	unsigned head = 0, tail = head;
+	uint16_t dsize;
+	ssize_t byteswrote;
+	int end = 0;
+	int i;
+
+
+	witems = calloc(wsize, sizeof(rwnditem_t));
+
+	for (i = 0; i < wsize; i++) {
+		witems[i].seq = 0;
+		witems[i].stat = PACK_UNRECVED;
+	}
+
+	while (!end) {
+
+		// recv packet
+		if (recv_packet(packet, hinfo, self, other) < 0) {
+			fprintf(stderr, "Error receiving packet\n");
+			exit(1);
+		}
+		printf("receiving data packet %hu\n", other->seq);
+
+		// put packet in buffer
+		for (i = 0; i < wsize; i++) {
+			if (other->seq == (nextseq + PACKSIZE * i)) {
+				witems[i].seq = other->seq;
+				witems[i].stat = PACK_BUFFERED;
+				dsize = other->flag >> 3;
+				memcpy(witems[i].data, packet + HEADERSIZE, dsize);
+				witems[i].datalen = dsize;
+			}
+			if (i == 0) {
+				nextseq += dsize;
+			}
+		}
+
+		// send back ACK packet
+		self->ack = nextseq;
+		memset(packet, 0, PACKSIZE);
+		if (send_packet(packet, hinfo, self, other) < 0) {
+			fprintf(stderr, "Error sending ACK packet\n");
+			exit(0);
+		}
+
+		printf("sending ack packet %hu\n", self->ack);
+		// store continuous buffered data in local file
+		for (i = head; i != tail; i++) {
+			if (witems[i].stat == PACK_UNRECVED)
+				break;
+			else if (witems[i].stat == PACK_BUFFERED) {
+				if ((byteswrote = write(filefd, witems[i].data, witems[i].datalen)) < 0) {
+					fprintf(stderr, "Error writing to file\n");
+					exit(1);
+				} else if (byteswrote != witems[i].datalen) {
+					fprintf(stderr, "Error: writing to file incomplete\n");
+					exit(1);
+				}
+				head = (head + 1) % wsize;
+				break;
+			}
+		}
+
+	}
+
 	return -1;
 }
 
-static int readdata(int filefd, wnditem_t *item)
+static int readdata(int filefd, swnditem_t *item)
 {
 	ssize_t bytesread;
 	if ((bytesread = read(filefd, item->data, DATASIZE)) > 0) {
@@ -152,6 +224,7 @@ static int readdata(int filefd, wnditem_t *item)
 		// no more data
 		return 0;
 	} else {
+		fprintf(stderr, "Error: cannot read file\n");
 		exit(1);
 	}
 }
@@ -172,6 +245,7 @@ static void *recv_ack(void *userdata)
 			// if received duplicated ACK
 			if (ud->other->ack == ud->lastpack->seq + ud->lastpack->datalen) {
 				fprintf(stdout, "Receiving ACK packet %hu\n", ud->other->ack);
+				*ud->cwnd = 1;
 				*ud->nacked += 1;
 				*ud->wsize = ud->other->rwnd / PACKSIZE;
 				if (*ud->cwnd < *ud->ssthresh) {
@@ -199,7 +273,7 @@ static void *recv_ack(void *userdata)
 					if (*ud->cwnd > *ud->wsize)
 						*ud->cwnd = *ud->wsize;
 					// mark this ACK as the last received packet
-					memcpy(ud->lastpack, &(ud->witems)[i], sizeof(wnditem_t));
+					memcpy(ud->lastpack, &(ud->witems)[i], sizeof(swnditem_t));
 					break;
 				}
 			}

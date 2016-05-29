@@ -28,6 +28,6 @@ util.o: util.c
 	$(CC) $(CFLAGS) -c util.c
 
 clean:
-	rm -rf *.o server client
+	rm -rf *.o server client received_file
 
 .PHONY: server client *.o

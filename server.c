@@ -67,8 +67,8 @@ int main(int argc, char **argv)
 
 	if (ftransfer_sender(&hinfo, filefd, &self, &other)) {
 		fprintf(stderr, "Error transfering file, exiting.\n");
-		return 233;
+		return 1;
 	}
 
-	return 123;
+	return 0;
 }

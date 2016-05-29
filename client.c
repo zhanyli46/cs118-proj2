@@ -2,14 +2,17 @@
 #include <sys/socket.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include "handshake.h"
+#include "ftransfer.h"
 #include "helper.h"
 #include "util.h"
 
 
 int main(int argc, char **argv)
 {
-	int sockfd;
+	int sockfd, filefd;
 	int exstat;
 	int inbytes, outbytes;
 	struct sockaddr_in servAddr, cliAddr;
@@ -54,6 +57,17 @@ int main(int argc, char **argv)
 	// set up handshake data
 	if (handshake_client(&hinfo, &self, &other)) {
 		fprintf(stderr, "Error: cannot set up a TCP-like connection\n");
+		return 1;
+	}
+
+	if ((filefd = open("received_file", O_WRONLY | O_APPEND | O_CREAT, 0644)) < 0) {
+		fprintf(stderr, "Error: cannot create file '%s'\n", "received_file");
+		return 1;
+	}
+
+	if (ftransfer_recver(&hinfo, filefd, &self, &other)) {
+		close(filefd);
+		fprintf(stderr, "Error receiving file, exiting.\n");
 		return 1;
 	}
 

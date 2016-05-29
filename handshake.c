@@ -2,7 +2,7 @@
 #include <stdio.h>	
 #include "handshake.h"
 
-int handshake_client(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
+int handshake_client(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other, size_t *fsize)
 {	
 	unsigned char packet[PACKSIZE];
 	ssize_t inbytes, outbytes;
@@ -12,12 +12,15 @@ int handshake_client(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
 	self->seq = init_seqnum();
 	self->ack = 0;
 	self->flag = SYN;
+	memset(packet, 0, PACKSIZE);
 
 	// send SYN + sequence number
 	fprintf(stdout, "Sending SYN packet\n");
 	if ((outbytes = send_packet(packet, hinfo, self, other)) < 0)
 		return -1;
 
+
+	memset(packet, 0, PACKSIZE);
 	// recv packet and check flag (SYN + ACK)
 	while ((inbytes = recv_packet(packet, hinfo, self, other)) >= 0) {
 		if (inbytes < 0)
@@ -31,10 +34,13 @@ int handshake_client(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
 		}
 	}
 
+	payload_fsize(packet, fsize);
+
 	// set connection parameters
 	self->seq += 1;
 	self->flag = ACK;
 	self->ack = nextseq;
+	memset(packet, 0, PACKSIZE);
 
 	// send ACK
 	fprintf(stdout, "Sending ACK packet\n");
@@ -48,6 +54,9 @@ int handshake_server(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
 	unsigned char packet[PACKSIZE];
 	ssize_t inbytes, outbytes;
 	uint16_t nextseq;
+	size_t fsize = 0;
+
+	fsize = self->seq * 65536 + self->ack;
 
 	self->seq = init_seqnum();
 	self->ack = 0;
@@ -75,12 +84,16 @@ START:
 	//set connection parameters
 	self->flag = SYN | ACK;
 	self->ack = nextseq;
-	
+	memset(packet, 0, PACKSIZE);
+	fsize_payload(packet, fsize);
+
 	// send SYN + ACK
 	fprintf(stdout, "Sending SYN/ACK packet\n");
 	if ((outbytes = send_packet(packet, hinfo, self, other)) < 0)
 		goto START;
 	
+
+	memset(packet, 0, PACKSIZE);
 	// recv packet and check flag (ACK)
 	while ((inbytes = recv_packet(packet, hinfo, self, other)) >= 0) {
 		if (inbytes < 0)

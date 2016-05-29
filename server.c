@@ -22,6 +22,7 @@ int main(int argc, char **argv)
 	char *ip;
 	conninfo_t self, other;
 	uint16_t seq, ack;
+	size_t fsize;
 
 	// check program arguments
 	if (argc != 3) {
@@ -53,22 +54,28 @@ int main(int argc, char **argv)
 	hinfo.addrlen = cliAddrLen;
 	self.rwnd = INITRWND;
 
+	// prepare to send the file
+	if ((filefd = open(argv[2], O_RDONLY)) < 0) {
+		fprintf(stderr, "Error: cannot open file '%s'\n", argv[2]);
+		return 1;
+	}
+	fsize = lseek(filefd, 0, SEEK_END);
+	lseek(filefd, 0, SEEK_SET);
+	// use seq and ack field to store file size
+	self.seq = fsize >> 16;
+	self.ack = fsize;
 	// wait for a client to initiate three-way handshake
 	if (handshake_server(&hinfo, &self, &other)) {
 		fprintf(stderr, "Error: cannot set up a TCP-like connection\n");
 		return 1;
 	}
 
-	// prepare to send the file
-	if ((filefd = open(argv[2], O_RDONLY)) < 0) {
-		fprintf(stderr, "Error: cannot open file '%s'\n", argv[2]);
-		return 1;
-	}
+	/*
 
 	if (ftransfer_sender(&hinfo, filefd, &self, &other)) {
 		fprintf(stderr, "Error transfering file, exiting.\n");
 		return 1;
-	}
+	}*/
 
 	return 0;
 }

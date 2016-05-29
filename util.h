@@ -21,5 +21,8 @@ int convert_to_ip(const char *host, char **ip);
 unsigned short init_seqnum();
 void ushort_to_string(uint16_t *ushort, unsigned char *str);
 void string_to_ushort(unsigned char *str, uint16_t *ushort);
+void fsize_to_string(size_t *fsize, unsigned char *str);
+void string_to_fsize(unsigned char *str, size_t *fsize);
+
 
 #endif

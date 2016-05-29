@@ -2,6 +2,7 @@
 #include "helper.h"
 #include "util.h"
 
+#include <stdio.h>
 
 
 void fill_header(unsigned char *p, uint16_t *seq, uint16_t *ack, uint16_t *rwnd, uint16_t *flag)
@@ -20,8 +21,6 @@ void fill_header(unsigned char *p, uint16_t *seq, uint16_t *ack, uint16_t *rwnd,
 	memcpy(p+5, srwnd+1, 1);
 	memcpy(p+6, sflag, 1);
 	memcpy(p+7, sflag+1, 1);
-
-	return;
 }
 
 void interpret_header(unsigned char *p, uint16_t *seq, uint16_t *ack, uint16_t *rwnd, uint16_t *flag)
@@ -36,13 +35,10 @@ void interpret_header(unsigned char *p, uint16_t *seq, uint16_t *ack, uint16_t *
 	memcpy(sflag, p+6, 1);
 	memcpy(sflag+1, p+7, 1);
 	
-
 	string_to_ushort(sseq, seq);
 	string_to_ushort(sack, ack);
 	string_to_ushort(srwnd, rwnd);
 	string_to_ushort(sflag, flag);
-
-	return;
 }
 
 ssize_t send_packet(unsigned char* packet, hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
@@ -62,4 +58,24 @@ ssize_t recv_packet(unsigned char* packet, hostinfo_t *hinfo, conninfo_t *self, 
 	}
 
 	return inbytes;
+}
+
+void fsize_payload(unsigned char *p, size_t fsize)
+{
+	unsigned char size[4];
+	fsize_to_string(&fsize, size);
+	memcpy(p + HEADERSIZE, size, 1);
+	memcpy(p + HEADERSIZE + 1, size + 1, 1);
+	memcpy(p + HEADERSIZE + 2, size + 2, 1);
+	memcpy(p + HEADERSIZE + 3, size + 3, 1);
+}
+
+void payload_fsize(unsigned char *p, size_t *fsize)
+{
+	unsigned char size[4];
+	memcpy(size, p + HEADERSIZE, 1);
+	memcpy(size + 1, p + HEADERSIZE + 1, 1);
+	memcpy(size + 2, p + HEADERSIZE + 2, 1);
+	memcpy(size + 3, p + HEADERSIZE + 3, 1);
+	string_to_fsize(size, fsize);
 }

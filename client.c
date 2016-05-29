@@ -21,6 +21,7 @@ int main(int argc, char **argv)
 	char *ip;
 	conninfo_t self, other;
 	uint16_t seq, ack;
+	size_t fsize = 0;
 
 	// check program arguments
 	if (argc != 3) {
@@ -55,21 +56,26 @@ int main(int argc, char **argv)
 	self.rwnd = INITRWND;
 
 	// set up handshake data
-	if (handshake_client(&hinfo, &self, &other)) {
+	if (handshake_client(&hinfo, &self, &other, &fsize)) {
 		fprintf(stderr, "Error: cannot set up a TCP-like connection\n");
 		return 1;
 	}
 
-	if ((filefd = open("received_file", O_WRONLY | O_APPEND | O_CREAT, 0644)) < 0) {
+	if ((filefd = open("received_file", O_WRONLY | O_CREAT | O_TRUNC, 0644)) < 0) {
 		fprintf(stderr, "Error: cannot create file '%s'\n", "received_file");
 		return 1;
 	}
+	ftruncate(filefd, fsize);
 
+/*
 	if (ftransfer_recver(&hinfo, filefd, &self, &other)) {
 		close(filefd);
 		fprintf(stderr, "Error receiving file, exiting.\n");
 		return 1;
 	}
+*/
 
+
+	close(filefd);
 	return 213;
 }

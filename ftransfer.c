@@ -27,6 +27,11 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 	unsigned char packet[PACKSIZE];
 	uint16_t initseq = self->seq;
 	witempool_t pool;
+
+	// retransmission parameters
+	struct timeval tv;
+	time_t d_sec;
+	long int d_usec;
 	
 	// thread control parameter
 	int thrdstop = 0;
@@ -66,11 +71,12 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 
 		limit = (cwnd < rwnd) ? cwnd : rwnd;
 		availpack = limit / PACKSIZE;
+
+		// send new data
 		for (i = 0; i < availpack; i++) {
 			if (bytesacked == fsize)
 				break;
 			memset(packet, 0, PACKSIZE);
-			
 			// read data
 			if ((bytesread = read(filefd, packet + HEADERSIZE, DATASIZE)) < 0) {
 				fprintf(stderr, "Error reading file\n");
@@ -79,8 +85,9 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 			// set header
 			self->seq = initseq + foffset % MAXSEQNUM;
 			self->flag = bytesread << 3;
-			// log operation
-			add_item(&pool, foffset, self->seq, bytesread);
+			// log operation as witem_t
+			gettimeofday(&tv, NULL);
+			add_item(&pool, foffset, self->seq, bytesread, &tv);
 			foffset += bytesread;
 			// send packet
 			fprintf(stdout, "Sending data packet %hu %hu %hu\n", self->seq, cwnd, ssthresh);
@@ -88,7 +95,40 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 				fprintf(stderr, "Error sending packet\n");
 				return -1;
 			}
+		}
 
+		// check timer and retransmit old data
+		for (i = 0; i < pool.nitems; i++) {
+			memset(packet, 0, PACKSIZE);
+			gettimeofday(&tv, NULL);
+			d_sec = tv.tv_sec - pool.list[i].tv.tv_sec;
+			d_usec = tv.tv_usec - pool.list[i].tv.tv_usec;
+
+			// retransmit
+			if (d_sec > 1 || d_usec < TIMEOUT * 1000) {
+				tempoffset = lseek(filefd, 0, SEEK_CUR);
+				lseek(filefd, pool.list[i].offset, SEEK_SET);
+
+				// re-read the data at offset
+				if ((bytesread = read(filefd, packet + HEADERSIZE, pool.list[i].datalen)) < 0) {
+					fprintf(stderr, "Error reading file\n");
+					return -1;
+				}
+				// set header
+				self->seq = pool.list[i].seq;
+				self->flag = pool.list[i].datalen;
+				// update logged witem_t
+				gettimeofday(&tv, NULL);
+				update_timer(&pool, i, &tv);
+
+				foffset = tempoffset;
+				// resend packet
+				fprintf(stdout, "Sending data packet %hu %hu %hu\n Retransmission", self->seq, cwnd, ssthresh);
+				if (send_packet(packet, hinfo, self, other) < 0) {
+					fprintf(stderr, "Error during retransmission\n");
+					return -1;
+				}
+			}
 		}
 		break;
 	}
@@ -99,75 +139,8 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 
 int ftransfer_recver(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *self, conninfo_t *other)
 {
+
 	return -1;
-}
-
-static int readdata(int filefd, swnditem_t *item)
-{
-	ssize_t bytesread;
-	if ((bytesread = read(filefd, item->data, DATASIZE)) > 0) {
-		item->datalen = bytesread;
-		return 1;
-	} else if (bytesread == 0) {
-		// no more data
-		return 0;
-	} else {
-		fprintf(stderr, "Error: cannot read file\n");
-		exit(1);
-	}
-}
-
-static void *recv_ack(void *userdata)
-{
-	userdata_t *ud = (userdata_t *)userdata;
-	uint16_t ack = 0;
-	unsigned i, j;
-
-	unsigned char packet[PACKSIZE];
-	while (!*ud->thrdstop) {
-		memset(packet, 0, PACKSIZE);
-		if (recv_packet(packet, ud->hinfo, ud->self, ud->other) < 0) {
-			fprintf(stderr, "Error receiving ack packets\n");
-			exit(2);
-		} else {
-			// if received duplicated ACK
-			if (ud->other->ack == ud->lastpack->seq + ud->lastpack->datalen) {
-				fprintf(stdout, "Receiving ACK packet %hu\n", ud->other->ack);
-				*ud->cwnd = 1;
-				*ud->nacked += 1;
-				*ud->wsize = ud->other->rwnd / PACKSIZE;
-				if (*ud->cwnd < *ud->ssthresh) {
-					*ud->cwnd *= 2;
-				} else {
-					*ud->cwnd += 1;
-				}
-				if (*ud->cwnd > *ud->wsize)
-					*ud->cwnd = *ud->wsize;
-				continue;
-			}
-			// if received different ACK
-			for (i = *ud->head; i != *ud->tail; i = (i + 1) % *ud->wsize) {
-				fprintf(stdout, "Receiving ACK packet %hu\n", ud->other->ack);
-				if (ud->other->ack == (ud->witems)[i].seq + (ud->witems[i].datalen)) {
-					// all packets before this ACK have been received
-					for (j = *ud->head; j != i; j = (j + 1) % *ud->wsize)
-						(ud->witems)[j].stat = PACK_ACKED;
-					*ud->wsize = ud->other->rwnd / PACKSIZE;
-					if (*ud->cwnd < *ud->ssthresh) {
-						*ud->cwnd *= 2;
-					} else {
-						*ud->cwnd += 1;
-					}
-					if (*ud->cwnd > *ud->wsize)
-						*ud->cwnd = *ud->wsize;
-					// mark this ACK as the last received packet
-					memcpy(ud->lastpack, &(ud->witems)[i], sizeof(swnditem_t));
-					break;
-				}
-			}
-		}
-	}
-	return NULL;
 }
 
 static void *listen_packet(void *ud)
@@ -176,7 +149,7 @@ static void *listen_packet(void *ud)
 	return NULL;
 }
 
-static void add_item(witempool_t *pool, unsigned offset, uint16_t seq, uint16_t datalen)
+static void add_item(witempool_t *pool, unsigned offset, uint16_t seq, uint16_t datalen, struct timeval *tv)
 {
 	if (pool->nitems == pool->size) {
 		pool->size *= 2;
@@ -187,5 +160,11 @@ static void add_item(witempool_t *pool, unsigned offset, uint16_t seq, uint16_t 
 	(pool->list)[pool->nitems].seq = seq;
 	(pool->list)[pool->nitems].datalen = datalen;
 	(pool->list)[pool->nitems].nacked = 0;
+	memcpy(&(pool->list)[pool->nitems].tv, tv, sizeof(struct timeval));
 	pool->nitems += 1;
+}
+
+static void update_timer(witempool_t *pool, int index, struct timeval *tv)
+{
+	memcpy(&(pool->list)[index].tv, tv, sizeof(struct timeval));
 }

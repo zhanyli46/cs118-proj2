@@ -50,6 +50,7 @@ typedef struct {
 	uint16_t seq;
 	uint16_t datalen;
 	int nacked;
+	struct timeval tv;
 } witem_t;
 
 typedef struct {
@@ -72,8 +73,6 @@ typedef struct {
 int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *self, conninfo_t *other);
 int ftransfer_recver(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *self, conninfo_t *other);
 
-static int readdata(int filefd, swnditem_t *item);
-static void *recv_ack(void *userdata);
-
 static void *listen_packet(void* userdata);
-static void add_item(witempool_t *pool, unsigned offset, uint16_t seq, uint16_t datalen);
+static void add_item(witempool_t *pool, unsigned offset, uint16_t seq, uint16_t datalen, struct timeval *tv);
+static void update_timer(witempool_t *pool, int index, struct timeval *tv);

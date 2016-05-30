@@ -67,13 +67,11 @@ int main(int argc, char **argv)
 	}
 	ftruncate(filefd, fsize);
 
-/*
-	if (ftransfer_recver(&hinfo, filefd, &self, &other)) {
+	if (ftransfer_recver(&hinfo, filefd, fsize, &self, &other)) {
 		close(filefd);
 		fprintf(stderr, "Error receiving file, exiting.\n");
 		return 1;
 	}
-*/
 
 
 	close(filefd);

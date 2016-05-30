@@ -6,212 +6,99 @@
 
 #include <stdio.h>
 
-int ftransfer_sender(hostinfo_t *hinfo, int filefd, conninfo_t *self, conninfo_t *other)
+int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *self, conninfo_t *other)
 {
-	// set send window corresponding to the receiver's window size
-	unsigned wsize = other->rwnd / PACKSIZE;	// receiver window size
-	unsigned cwnd = 1;							// congestion window size
-	unsigned ssthresh = INITSSTHRESH;			// ssthresh value
-	unsigned limit;								// the smaller of wsize and cwnd
-	swnditem_t *witems;							// elements in a window
-	swnditem_t lastpack;
-	int nacked;
-	unsigned char packet[PACKSIZE];				// a packet including header and data
-	uint16_t nextseq = self->seq;				// sequence number for next packet
-	int end = 0;								// termination boolean
-	int nodata = 0, nsent = 0;
-	unsigned head = 0, tail;
-	pthread_t tid;
+	// send flow/congestion control parameters
+	uint16_t cwnd = INITCWND;
+	uint16_t ssthresh = 65535;
+	uint16_t rwnd = other->rwnd;
+	uint16_t availpack = 0;
+	uint16_t limit = 0;
+	uint16_t bytesonwire = 0;
+
+	// file read control parameters
+	off_t foffset = 0;
+	off_t tempoffset = 0;
+	size_t bytesend = 0;
+	size_t bytesacked = 0;
+	ssize_t bytesread = 0;
+
+	// packet parameters
+	unsigned char packet[PACKSIZE];
+	uint16_t initseq = self->seq;
+	witempool_t pool;
+	
+	// thread control parameter
 	int thrdstop = 0;
-	unsigned i;
-	struct timeval now;
 
-	witems = calloc(wsize, sizeof(swnditem_t));
-	for (i = 0; i < wsize; i++) {
-		witems[i].seq = 0;
-		witems[i].stat = PACK_UNSENT;
-	}
+	// misc
+	pthread_t tid;
+	int end = 0;
+	int i = 0;
 
-	userdata_t ud;
+	// create listening thread
+	userdata ud;
 	ud.hinfo = hinfo;
 	ud.self = self;
 	ud.other = other;
 	ud.thrdstop = &thrdstop;
-	ud.witems = witems;
 	ud.cwnd = &cwnd;
 	ud.ssthresh = &ssthresh;
-	ud.wsize = &wsize;
-	ud.head = &head;
-	ud.tail = &tail;
-	ud.lastpack = &lastpack;
-	ud.nacked = &nacked;
-	lastpack.seq = 0;
-	lastpack.datalen = 0;
+	ud.rwnd = &rwnd;
+	ud.pool = &pool;
 
-	if (pthread_create(&tid, NULL, *recv_ack, &ud) != 0) {
-		fprintf(stderr, "Error: cannot create pthread\n");
-		exit(1);
+	if (pthread_create(&tid, NULL, listen_packet, &ud) != 0) {
+		fprintf(stderr, "Error: cannot create new thread\n");
+		return -1;
 	}
 
+	pool.list = NULL;
+	pool.nitems = 0;
+	pool.size = 4;
+	pool.list = calloc(pool.size, sizeof(witem_t));
+
+	lseek(filefd, 0, SEEK_SET);
+	
 	while (!end) {
-		limit = (wsize < cwnd) ? wsize : cwnd;
-		tail = (head + limit) % wsize;
+		// while there's more data and hasn't received all ACKs
+		//	1. send data up to the smaller of cwnd and rwnd
+		//	2. wait for ACKs
 
-		// UNSENT (send packet if there's space in the queue and unsent data)
-		for (i = head; i != tail; i = (i + 1) % wsize) {
-			if (witems[i].stat == PACK_UNSENT) {
-				if (nodata == 1)
-					break;
-				memset(packet, 0, PACKSIZE);
-				// set timer and send packet
-				if (readdata(filefd, &witems[i])) {
-					witems[i].seq = nextseq;
-					self->seq = nextseq;
-					nextseq =  (nextseq + witems[i].datalen) % wsize;
-					self->ack = 0;
-					self->flag = witems[i].datalen << 3;
-					memcpy(packet + HEADERSIZE, witems[i].data, witems[i].datalen);
-					fprintf(stdout, "Sending data packet %hu %u %u\n", 
-						self->seq, cwnd * PACKSIZE, ssthresh * PACKSIZE);
-					gettimeofday(&witems[i].tv, NULL);
-					if (send_packet(packet, hinfo, self, other) < 0) {
-						fprintf(stderr, "Error sending packets\n");
-						exit(1);
-					}
-					nsent++;
-					witems[i].stat = PACK_SENT;
-				} else {
-					nodata = 1;
-				}
+		limit = (cwnd < rwnd) ? cwnd : rwnd;
+		availpack = limit / PACKSIZE;
+		for (i = 0; i < availpack; i++) {
+			if (bytesacked == fsize)
+				break;
+			memset(packet, 0, PACKSIZE);
+			
+			// read data
+			if ((bytesread = read(filefd, packet + HEADERSIZE, DATASIZE)) < 0) {
+				fprintf(stderr, "Error reading file\n");
+				return -1;
 			}
-		}
-
-		// SENT (check timer for each sent packet for retransmission)
-		for (i = head; i != tail; i = (i + 1) % wsize) {
-			gettimeofday(&now, NULL);
-			long deltausec = now.tv_usec - witems[i].tv.tv_usec;
-			int deltasec = now.tv_sec - witems[i].tv.tv_sec;
-			if (deltasec > 0 || deltausec > TIMEOUT * 1000) {
-				cwnd = 1;
-				self->seq = witems[i].seq;
-				self->ack = 0;
-				self->flag = witems[i].datalen << 3;
-				memcpy(packet + HEADERSIZE, witems[i].data, witems[i].datalen);
-				fprintf(stdout, "Sending data packet %hu %u %u Retransmission\n", 
-						self->seq, cwnd * PACKSIZE, ssthresh * PACKSIZE);
-				gettimeofday(&witems[i].tv, NULL);
-				if (send_packet(packet, hinfo, self, other) < 0) {
-					fprintf(stderr, "Error sending packets\n");
-					exit(1);
-				}
-			}
-		}
-
-		// ACKED (move window frame)
-		for (i = head; i != tail; i = (i + 1) % wsize) {
-			if (witems[i].stat == PACK_ACKED) {
-				memset(&(witems[i].tv), 0, sizeof(struct timeval));
-				memset(witems[i].data, 0, DATASIZE);
-				witems[i].stat = PACK_UNSENT;
-				nsent--;
-				head = (head + 1) % wsize;
-			}
-		}
-
-		//  check for duplicate ACKs and retransmission
-		if (nacked >= 3) {
-			self->seq = lastpack.seq;
-			self->ack = 0;
-			self->flag = lastpack.datalen << 3;
-			memcpy(packet + HEADERSIZE, lastpack.data, lastpack.datalen);
-			fprintf(stdout, "Sending data packet %hu %u %u Retransmission\n", 
-						self->seq, cwnd * PACKSIZE, ssthresh * PACKSIZE);
-			gettimeofday(&lastpack.tv, NULL);
+			// set header
+			self->seq = initseq + foffset % MAXSEQNUM;
+			self->flag = bytesread << 3;
+			// log operation
+			add_item(&pool, foffset, self->seq, bytesread);
+			foffset += bytesread;
+			// send packet
+			fprintf(stdout, "Sending data packet %hu %hu %hu\n", self->seq, cwnd, ssthresh);
 			if (send_packet(packet, hinfo, self, other) < 0) {
-				fprintf(stderr, "Error sending packets\n");
-				exit(1);
+				fprintf(stderr, "Error sending packet\n");
+				return -1;
 			}
-		}
 
-		end = nodata && (nsent == 0);
+		}
+		break;
 	}
 
-	// terminate connection (FIN)
 
-	return 0;
+	return -1;
 }
 
-int ftransfer_recver(hostinfo_t *hinfo, int filefd, conninfo_t *self, conninfo_t *other)
+int ftransfer_recver(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *self, conninfo_t *other)
 {
-	unsigned wsize = self->rwnd / PACKSIZE;
-	rwnditem_t *witems;
-	unsigned char packet[PACKSIZE];
-	uint16_t nextseq = self->ack;
-	unsigned head = 0, tail = head;
-	uint16_t dsize;
-	ssize_t byteswrote;
-	int end = 0;
-	int i;
-
-
-	witems = calloc(wsize, sizeof(rwnditem_t));
-
-	for (i = 0; i < wsize; i++) {
-		witems[i].seq = 0;
-		witems[i].stat = PACK_UNRECVED;
-	}
-
-	while (!end) {
-
-		// recv packet
-		if (recv_packet(packet, hinfo, self, other) < 0) {
-			fprintf(stderr, "Error receiving packet\n");
-			exit(1);
-		}
-		printf("receiving data packet %hu\n", other->seq);
-
-		// put packet in buffer
-		for (i = 0; i < wsize; i++) {
-			if (other->seq == (nextseq + PACKSIZE * i)) {
-				witems[i].seq = other->seq;
-				witems[i].stat = PACK_BUFFERED;
-				dsize = other->flag >> 3;
-				memcpy(witems[i].data, packet + HEADERSIZE, dsize);
-				witems[i].datalen = dsize;
-			}
-			if (i == 0) {
-				nextseq += dsize;
-			}
-		}
-
-		// send back ACK packet
-		self->ack = nextseq;
-		memset(packet, 0, PACKSIZE);
-		if (send_packet(packet, hinfo, self, other) < 0) {
-			fprintf(stderr, "Error sending ACK packet\n");
-			exit(0);
-		}
-
-		printf("sending ack packet %hu\n", self->ack);
-		// store continuous buffered data in local file
-		for (i = head; i != tail; i++) {
-			if (witems[i].stat == PACK_UNRECVED)
-				break;
-			else if (witems[i].stat == PACK_BUFFERED) {
-				if ((byteswrote = write(filefd, witems[i].data, witems[i].datalen)) < 0) {
-					fprintf(stderr, "Error writing to file\n");
-					exit(1);
-				} else if (byteswrote != witems[i].datalen) {
-					fprintf(stderr, "Error: writing to file incomplete\n");
-					exit(1);
-				}
-				head = (head + 1) % wsize;
-				break;
-			}
-		}
-
-	}
-
 	return -1;
 }
 
@@ -281,4 +168,24 @@ static void *recv_ack(void *userdata)
 		}
 	}
 	return NULL;
+}
+
+static void *listen_packet(void *ud)
+{
+
+	return NULL;
+}
+
+static void add_item(witempool_t *pool, unsigned offset, uint16_t seq, uint16_t datalen)
+{
+	if (pool->nitems == pool->size) {
+		pool->size *= 2;
+		pool->list = realloc(pool->list, pool->size);
+	}
+
+	(pool->list)[pool->nitems].offset = offset;
+	(pool->list)[pool->nitems].seq = seq;
+	(pool->list)[pool->nitems].datalen = datalen;
+	(pool->list)[pool->nitems].nacked = 0;
+	pool->nitems += 1;
 }

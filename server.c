@@ -70,12 +70,12 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	/*
 
-	if (ftransfer_sender(&hinfo, filefd, &self, &other)) {
+	if (ftransfer_sender(&hinfo, filefd, fsize, &self, &other)) {
+		close(filefd);
 		fprintf(stderr, "Error transfering file, exiting.\n");
 		return 1;
-	}*/
+	}
 
 	return 0;
 }

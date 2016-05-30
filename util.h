@@ -13,7 +13,8 @@
 #define MAXSEQNUM		30720
 #define TIMEOUT			500			// milliseconds
 #define INITRWND 		30720
-#define INITSSTHRESH	65535 / PACKSIZE
+#define INITCWND		PACKSIZE
+#define INITSSTHRESH	65535
 
 int is_numeric(const char *str);
 int is_ip_format(const char *str);

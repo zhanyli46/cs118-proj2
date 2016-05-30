@@ -43,37 +43,7 @@ typedef struct {
 	int *nacked;
 } userdata_t;
 
-
-
-typedef struct {
-	unsigned offset;
-	uint16_t seq;
-	uint16_t datalen;
-	int nacked;
-} witem_t;
-
-typedef struct {
-	witem_t *list;
-	int nitems;
-	int size;
-} witempool_t;
-
-typedef struct {
-	hostinfo_t *hinfo;
-	conninfo_t *self;
-	conninfo_t *other;
-	int *thrdstop;
-	uint16_t *cwnd;
-	uint16_t *ssthresh;
-	uint16_t *rwnd;
-	witempool_t *pool;
-} userdata;
-
-int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *self, conninfo_t *other);
-int ftransfer_recver(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *self, conninfo_t *other);
-
+int ftransfer_sender(hostinfo_t *hinfo, int filefd, conninfo_t *self, conninfo_t *other);
+int ftransfer_recver(hostinfo_t *hinfo, int filefd, conninfo_t *self, conninfo_t *other);
 static int readdata(int filefd, swnditem_t *item);
 static void *recv_ack(void *userdata);
-
-static void *listen_packet(void* userdata);
-static void add_item(witempool_t *pool, unsigned offset, uint16_t seq, uint16_t datalen);

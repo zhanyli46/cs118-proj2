@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=
+CFLAGS=-ftrapv
 
 all: server client
 

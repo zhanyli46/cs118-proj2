@@ -19,30 +19,32 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 	// file read control parameters
 	off_t foffset = 0;
 	off_t tempoffset = 0;
-	size_t bytesend = 0;
-	size_t bytesacked = 0;
+	ssize_t bytesend = 0;
+	ssize_t bsend = 0;
+	ssize_t bytesacked = 0;
 	ssize_t bytesread = 0;
+	int nodata = 0;
 
 	// packet parameters
 	unsigned char packet[PACKSIZE];
 	uint16_t initseq = self->seq;
-	witempool_t pool;
+	wnditempool_t witems;
 
 	// retransmission parameters
-	struct timeval tv;
-	time_t d_sec;
-	long int d_usec;
+	struct timeval curtime;
+	time_t d_sec = 0;
+	long int d_usec = 0;
 	
 	// thread control parameter
+	pthread_t tid;
 	int thrdstop = 0;
 
 	// misc
-	pthread_t tid;
 	int end = 0;
 	int i = 0;
 
 	// create listening thread
-	userdata ud;
+	sendudata_t ud;
 	ud.hinfo = hinfo;
 	ud.self = self;
 	ud.other = other;
@@ -50,17 +52,16 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 	ud.cwnd = &cwnd;
 	ud.ssthresh = &ssthresh;
 	ud.rwnd = &rwnd;
-	ud.pool = &pool;
+	ud.witems = &witems;
 
-	if (pthread_create(&tid, NULL, listen_packet, &ud) != 0) {
+	if (pthread_create(&tid, NULL, listen_ackpacket, &ud) != 0) {
 		fprintf(stderr, "Error: cannot create new thread\n");
 		return -1;
 	}
 
-	pool.list = NULL;
-	pool.nitems = 0;
-	pool.size = 4;
-	pool.list = calloc(pool.size, sizeof(witem_t));
+	witems.nitems = 0;
+	witems.size = 4;
+	witems.list = calloc(witems.size, sizeof(wnditem_t));
 
 	lseek(filefd, 0, SEEK_SET);
 	
@@ -70,12 +71,14 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 		//	2. wait for ACKs
 
 		limit = (cwnd < rwnd) ? cwnd : rwnd;
-		availpack = limit / PACKSIZE;
-
+		availpack = (limit - bytesend) / PACKSIZE;
+		
 		// send new data
 		for (i = 0; i < availpack; i++) {
-			if (bytesacked == fsize)
+			if (bytesread == fsize) {
+				nodata = 1;
 				break;
+			}
 			memset(packet, 0, PACKSIZE);
 			// read data
 			if ((bytesread = read(filefd, packet + HEADERSIZE, DATASIZE)) < 0) {
@@ -85,52 +88,53 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 			// set header
 			self->seq = initseq + foffset % MAXSEQNUM;
 			self->flag = bytesread << 3;
-			// log operation as witem_t
-			gettimeofday(&tv, NULL);
-			add_item(&pool, foffset, self->seq, bytesread, &tv);
+			// log operation as wnditem_t
+			gettimeofday(&curtime, NULL);
+			add_witem(&witems, foffset, self->seq, bytesread, &curtime);
 			foffset += bytesread;
+
 			// send packet
 			fprintf(stdout, "Sending data packet %hu %hu %hu\n", self->seq, cwnd, ssthresh);
-			if (send_packet(packet, hinfo, self, other) < 0) {
+			if ((bsend = send_packet(packet, hinfo, self, other)) < 0) {
 				fprintf(stderr, "Error sending packet\n");
 				return -1;
 			}
+			bytesend += bsend;
 		}
 
 		// check timer and retransmit old data
-		for (i = 0; i < pool.nitems; i++) {
+		for (i = 0; i < witems.nitems; i++) {
 			memset(packet, 0, PACKSIZE);
-			gettimeofday(&tv, NULL);
-			d_sec = tv.tv_sec - pool.list[i].tv.tv_sec;
-			d_usec = tv.tv_usec - pool.list[i].tv.tv_usec;
+			gettimeofday(&curtime, NULL);
+			d_sec = curtime.tv_sec - witems.list[i].tv.tv_sec;
+			d_usec = curtime.tv_usec - witems.list[i].tv.tv_usec;
 
 			// retransmit
-			if (d_sec > 1 || d_usec < TIMEOUT * 1000) {
+			if (d_sec * 1000000 + d_usec > TIMEOUT * 1000) {
 				tempoffset = lseek(filefd, 0, SEEK_CUR);
-				lseek(filefd, pool.list[i].offset, SEEK_SET);
+				lseek(filefd, witems.list[i].offset, SEEK_SET);
 
 				// re-read the data at offset
-				if ((bytesread = read(filefd, packet + HEADERSIZE, pool.list[i].datalen)) < 0) {
+				if ((bytesread = read(filefd, packet + HEADERSIZE, witems.list[i].datalen)) < 0) {
 					fprintf(stderr, "Error reading file\n");
 					return -1;
 				}
 				// set header
-				self->seq = pool.list[i].seq;
-				self->flag = pool.list[i].datalen;
-				// update logged witem_t
-				gettimeofday(&tv, NULL);
-				update_timer(&pool, i, &tv);
-
+				self->seq = witems.list[i].seq;
+				self->flag = witems.list[i].datalen;
+				// update logged wnditem_t
+				update_timer(&witems, i, &curtime);
 				foffset = tempoffset;
 				// resend packet
-				fprintf(stdout, "Sending data packet %hu %hu %hu\n Retransmission", self->seq, cwnd, ssthresh);
+				fprintf(stdout, "Sending data packet %hu %hu %hu Retransmission\n", self->seq, cwnd, ssthresh);
 				if (send_packet(packet, hinfo, self, other) < 0) {
 					fprintf(stderr, "Error during retransmission\n");
 					return -1;
 				}
 			}
 		}
-		break;
+		//end--;
+		end = nodata && (bytesacked == fsize);
 	}
 
 
@@ -139,32 +143,166 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 
 int ftransfer_recver(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *self, conninfo_t *other)
 {
+	// file write control parameters
+	off_t foffset = 0;
 
+	// packet and buffering parameters
+	unsigned char packet[PACKSIZE];
+	uint16_t initack = other->seq + 1;
+	uint16_t nextack = initack;
+	bufitempool_t bitems;
+
+	// thread control
+	pthread_t tid;
+	int thrdstop = 0;
+
+	// misc
+	int end = 0;
+	int i = 0;
+
+	// creating listening thread
+	recvudata_t ud;
+	ud.hinfo = hinfo;
+	ud.self = self;
+	ud.other = other;
+	ud.thrdstop = &thrdstop;
+	ud.bitems = &bitems;
+	ud.initack = initack;
+	ud.nextack = &nextack;
+	ud.foffset = &foffset;
+
+	if (pthread_create(&tid, NULL, listen_datapacket, &ud) != 0) {
+		fprintf(stderr, "Error: cannot create new thread\n");
+		return -1;
+	}
+
+	bitems.nitems = 0;
+	bitems.size = MAXSEQNUM / DATASIZE;
+	bitems.list = calloc(bitems.size, sizeof(bufitem_t));
+
+	lseek(filefd, 0, SEEK_SET);
+
+	while (!end) {
+		// check list and write data continuously
+		for (i = 0; i < bitems.nitems; i++) {
+			if (bitems.list[i].offset != foffset)
+				continue;
+			// write next chunk of data
+			lseek(filefd, foffset, SEEK_SET);
+			if (write(filefd, bitems.list[i].data, bitems.list[i].datalen) < 0) {
+				fprintf(stderr, "Error: cannot write to file\n");
+			}
+			// update new file offset
+			foffset += bitems.list[i].datalen;
+			// remove the written item from buffer
+			remove_bitem(&bitems, i);
+		}
+		end = (foffset == fsize);
+	}
 	return -1;
 }
 
-static void *listen_packet(void *ud)
+static void *listen_ackpacket(void *ud)
 {
+	return NULL;
+}
+
+static void *listen_datapacket(void *userdata)
+{
+	// retrieve passed data from userdata
+	recvudata_t *ud = (recvudata_t *)userdata;
+	hostinfo_t *hinfo = ud->hinfo;
+	conninfo_t *self = ud->self;
+	conninfo_t *other = ud->other;
+	int *thrdstop = ud->thrdstop;
+	bufitempool_t *bitems = ud->bitems;
+	uint16_t initack = ud->initack;
+	uint16_t *nextack = ud->nextack;
+	off_t *foffset = ud->foffset;
+
+	unsigned char packet[PACKSIZE];
+	off_t offset = 0;
+	uint16_t datalen = 0;
+	int multiplier = 0;
+	uint16_t lastseq = initack;
+	uint16_t deltaseq = 0;
+
+
+	while (!*thrdstop) {
+		// listen for packet
+		memset(packet, 0, PACKSIZE);
+		if (recv_packet(packet, hinfo, self, other) < 0) {
+			fprintf(stderr, "Fatal error: cannot receive data packets, aborting\n");
+			exit(2);
+		}
+		fprintf(stderr, "Receiving data packet %hu\n", other->seq);
+
+		// check if seq has overflowed
+		deltaseq = (lastseq < other->seq) ? other->seq - lastseq : lastseq - other->seq;
+		if (deltaseq > OFTHRESH)
+			multiplier += 1;
+
+		offset = (unsigned)other->seq + multiplier * MAXSEQNUM - initack;
+		datalen = other->flag >> 3;
+		add_bitem(bitems, offset, packet + HEADERSIZE, datalen);
+
+		// send back ACK packets
+		self->ack = (offset == *foffset) ? other->seq + datalen : self->ack;
+		memset(packet, 0, PACKSIZE);
+		fprintf(stderr, "Sending ACK packet %hu\n", self->ack);
+		if (send_packet(packet, hinfo, self, other) < 0) {
+			fprintf(stderr, "Fatal error: cannot send ACK packet, aborting\n");
+			exit(2);
+		}
+	}
+
 
 	return NULL;
 }
 
-static void add_item(witempool_t *pool, unsigned offset, uint16_t seq, uint16_t datalen, struct timeval *tv)
+static void add_witem(wnditempool_t *witems, off_t offset, uint16_t seq, uint16_t datalen, struct timeval *tv)
 {
-	if (pool->nitems == pool->size) {
-		pool->size *= 2;
-		pool->list = realloc(pool->list, pool->size);
+	if (witems->nitems == witems->size) {
+		witems->size *= 2;
+		witems->list = realloc(witems->list, witems->size);
 	}
 
-	(pool->list)[pool->nitems].offset = offset;
-	(pool->list)[pool->nitems].seq = seq;
-	(pool->list)[pool->nitems].datalen = datalen;
-	(pool->list)[pool->nitems].nacked = 0;
-	memcpy(&(pool->list)[pool->nitems].tv, tv, sizeof(struct timeval));
-	pool->nitems += 1;
+	(witems->list)[witems->nitems].offset = offset;
+	(witems->list)[witems->nitems].seq = seq;
+	(witems->list)[witems->nitems].datalen = datalen;
+	(witems->list)[witems->nitems].nacked = 0;
+	(witems->list)[witems->nitems].tv.tv_sec = tv->tv_sec;
+	(witems->list)[witems->nitems].tv.tv_usec = tv->tv_usec;
+	witems->nitems += 1;
 }
 
-static void update_timer(witempool_t *pool, int index, struct timeval *tv)
+static void add_bitem(bufitempool_t *bitems, off_t offset, unsigned char *data, uint16_t datalen)
 {
-	memcpy(&(pool->list)[index].tv, tv, sizeof(struct timeval));
+	int i;
+	if (bitems->nitems == bitems->size)
+		return;
+
+	for (i = 0; i < bitems->nitems; i++) {
+		if (bitems->list[i].offset == offset)
+			return;
+	}
+	(bitems->list)[bitems->nitems].offset = offset;
+	(bitems->list)[bitems->nitems].datalen = datalen;
+	(bitems->list)[bitems->nitems].data = malloc(datalen);
+	memcpy((bitems->list)[bitems->nitems].data, data, datalen);
+	bitems->nitems += 1;
+	fprintf(stderr, "Buffering %lld, n = %i\n", offset, bitems->nitems);
+}
+
+static void remove_bitem(bufitempool_t *bitems, int index)
+{
+	memmove(&bitems->list[index], &bitems->list[index + 1], bitems->size - (index + 1));
+	bitems->nitems -= 1;
+	memset(&bitems->list[index], 0, sizeof(bufitem_t));
+	fprintf(stderr, "Removing [i]th item from bitems, n = %i\n", bitems->nitems);
+}
+
+static void update_timer(wnditempool_t *witems, int index, struct timeval *tv)
+{
+	memcpy(&(witems->list)[index].tv, tv, sizeof(struct timeval));
 }

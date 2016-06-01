@@ -9,6 +9,8 @@
 #include "helper.h"
 #include "util.h"
 
+#define RECVFNAME "received_file"
+
 
 int main(int argc, char **argv)
 {
@@ -61,11 +63,12 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	if ((filefd = open("received_file", O_WRONLY | O_CREAT | O_TRUNC, 0644)) < 0) {
+	if (access(RECVFNAME, F_OK) == 0)
+		remove(RECVFNAME);
+	if ((filefd = open(RECVFNAME, O_WRONLY | O_CREAT | O_APPEND, 0644)) < 0) {
 		fprintf(stderr, "Error: cannot create file '%s'\n", "received_file");
 		return 1;
 	}
-	ftruncate(filefd, fsize);
 
 	if (ftransfer_recver(&hinfo, filefd, fsize, &self, &other)) {
 		close(filefd);

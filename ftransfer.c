@@ -182,8 +182,11 @@ int ftransfer_recver(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 
 	lseek(filefd, 0, SEEK_SET);
 
+	
 	while (!end) {
 		// check list and write data continuously
+		if (bitems.nitems == 0)
+			continue;
 		for (i = 0; i < bitems.nitems; i++) {
 			if (bitems.list[i].offset != foffset)
 				continue;
@@ -202,8 +205,19 @@ int ftransfer_recver(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 	return -1;
 }
 
-static void *listen_ackpacket(void *ud)
+static void *listen_ackpacket(void *userdata)
 {
+	sendudata_t *ud = (sendudata_t *)userdata;
+	hostinfo_t *hinfo = ud->hinfo;
+	conninfo_t *self = ud->self;
+	conninfo_t *other = ud->other;
+	int *thrdstop = ud->thrdstop;
+	uint16_t *cwnd = ud->cwnd;
+	uint16_t *ssthresh = ud->ssthresh;
+	uint16_t *rwnd = ud->rwnd;
+	wnditempool_t *witems = ud->witems;
+
+	
 	return NULL;
 }
 
@@ -227,7 +241,6 @@ static void *listen_datapacket(void *userdata)
 	uint16_t lastseq = initack;
 	uint16_t deltaseq = 0;
 
-
 	while (!*thrdstop) {
 		// listen for packet
 		memset(packet, 0, PACKSIZE);
@@ -243,11 +256,18 @@ static void *listen_datapacket(void *userdata)
 			multiplier += 1;
 
 		offset = (unsigned)other->seq + multiplier * MAXSEQNUM - initack;
+		// check if the packet data is already received
+		if (offset < *foffset) {
+			fprintf(stderr, "Sending ACK packet %hu Retransmission\n", *nextack);
+			continue;
+		}
 		datalen = other->flag >> 3;
 		add_bitem(bitems, offset, packet + HEADERSIZE, datalen);
 
 		// send back ACK packets
-		self->ack = (offset == *foffset) ? other->seq + datalen : self->ack;
+		*nextack = (offset == *foffset) ? other->seq + datalen : *nextack;
+		self->ack = *nextack;
+		self->flag = ACK;
 		memset(packet, 0, PACKSIZE);
 		fprintf(stderr, "Sending ACK packet %hu\n", self->ack);
 		if (send_packet(packet, hinfo, self, other) < 0) {
@@ -255,7 +275,6 @@ static void *listen_datapacket(void *userdata)
 			exit(2);
 		}
 	}
-
 
 	return NULL;
 }
@@ -297,7 +316,8 @@ static void add_bitem(bufitempool_t *bitems, off_t offset, unsigned char *data, 
 static void remove_bitem(bufitempool_t *bitems, int index)
 {
 	memmove(&bitems->list[index], &bitems->list[index + 1], bitems->size - (index + 1));
-	bitems->nitems -= 1;
+	if (bitems->nitems != 0)
+		bitems->nitems -= 1;
 	memset(&bitems->list[index], 0, sizeof(bufitem_t));
 	fprintf(stderr, "Removing [i]th item from bitems, n = %i\n", bitems->nitems);
 }

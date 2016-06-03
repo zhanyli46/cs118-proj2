@@ -12,6 +12,8 @@ typedef struct {
 
 typedef struct {
 	wnditem_t *list;
+	int head;
+	int tail;
 	int nitems;
 	int size;
 } wnditempool_t;
@@ -38,6 +40,8 @@ typedef struct {
 
 typedef struct {
 	bufitem_t *list;
+	int head;
+	int tail;
 	int nitems;
 	int size;
 } bufitempool_t;
@@ -51,6 +55,7 @@ typedef struct {
 	uint16_t initack;
 	uint16_t *nextack;
 	off_t *foffset;
+	int *end;
 } recvudata_t;
 
 int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *self, conninfo_t *other);

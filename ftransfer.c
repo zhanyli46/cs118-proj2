@@ -8,6 +8,7 @@
 
 pthread_mutex_t wmutex;
 pthread_mutex_t bmutex;
+int aa = 0;
 
 int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *self, conninfo_t *other)
 {
@@ -69,16 +70,19 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 		return -1;
 	}
 	if (pthread_mutex_init(&wmutex, NULL) != 0) {
-		fprintf(stderr, "Error: cannot create thread mutex\n");
+		fprintf(stderr, "Error: cannot create thread wmutex\n");
 		return -1;
 	}
 
 	witems.head = 0;
 	witems.tail = 0;
+	witems.nitems = 0;
 	witems.size = MAXSEQNUM / DATASIZE;
 	witems.list = calloc(witems.size, sizeof(wnditem_t));
 
 	lseek(filefd, 0, SEEK_SET);
+
+	
 	
 	while (foffset != fsize) {
 		// assume no packet loss, no congestion window
@@ -105,8 +109,10 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 			// log operation as wnditem_t
 			gettimeofday(&curtime, NULL);
 		
+
 			while (1) {
 				if (witems.nitems < witems.size) {
+					
 					pthread_mutex_lock(&wmutex);
 					add_witem(&witems, foffset, self->seq, bytesread, &curtime);
 					pthread_mutex_unlock(&wmutex);
@@ -114,6 +120,7 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 				}
 			}
 			foffset += bytesread;
+
 
 			// send packet
 			fprintf(stderr, "Sending data packet %hu %hu %hu\n", self->seq, cwnd, ssthresh);
@@ -167,6 +174,10 @@ int ftransfer_recver(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 		fprintf(stderr, "Error: cannot create new thread\n");
 		return -1;
 	}
+	if (pthread_mutex_init(&bmutex, NULL) != 0) {
+		fprintf(stderr, "Error: cannot create thread bmutex\n");
+		return -1;
+	}
 
 	bitems.head = 0;
 	bitems.tail = 0;
@@ -181,7 +192,7 @@ int ftransfer_recver(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 		if (bitems.nitems == 0)
 			continue;
 		pthread_mutex_lock(&bmutex);
-		for (i = bitems.head; i != bitems.tail; i++) {
+		for (i = bitems.head; i != bitems.tail; i = (i + 1) % bitems.size) {
 			if (bitems.list[i].offset != foffset)
 				continue;
 			// write next chunk of data
@@ -238,7 +249,7 @@ static void *listen_ackpacket(void *userdata)
 		}
 
 		pthread_mutex_lock(&wmutex);
-		for (i = witems->head; i != witems->tail; i++) {
+		for (i = witems->head; i != witems->tail; i = (i + 1) % witems->size) {
 			if ((witems->list[i].seq < *acknum) || 
 				((witems->list[i].seq > *acknum) && (witems->list[i].seq - *acknum > OFTHRESH))) {
 				*bytesend -= witems->list[i].datalen + HEADERSIZE;
@@ -347,6 +358,8 @@ static void *listen_datapacket(void *userdata)
 
 static void add_witem(wnditempool_t *witems, off_t offset, uint16_t seq, uint16_t datalen, struct timeval *tv)
 {
+	aa++;
+	printf("%d\n", aa);
 	(witems->list)[witems->tail].offset = offset;
 	(witems->list)[witems->tail].seq = seq;
 	(witems->list)[witems->tail].datalen = datalen;
@@ -354,10 +367,12 @@ static void add_witem(wnditempool_t *witems, off_t offset, uint16_t seq, uint16_
 	(witems->list)[witems->tail].tv.tv_usec = tv->tv_usec;
 	witems->tail = (witems->tail + 1) % witems->size;
 	witems->nitems += 1;
+	printf("witem added, head %d tail %d nitems %d\n", witems->head, witems->tail, witems->nitems);
 }
 
 static void remove_witem(wnditempool_t *witems, int index)
 {
+
 	if (index == witems->head) {
 		memset(&witems->list[index], 0, sizeof(wnditem_t));
 		witems->head = (witems->head + 1) % witems->size;
@@ -380,12 +395,13 @@ static void remove_witem(wnditempool_t *witems, int index)
 	} else {
 		return;
 	}
+	printf("witem removed, head %d tail %d nitems %d\n", witems->head, witems->tail, witems->nitems);
 }
 
 static void add_bitem(bufitempool_t *bitems, off_t offset, unsigned char *data, uint16_t datalen)
 {
 	int i;
-	for (i = bitems->head; i != bitems->tail; i++) {
+	for (i = bitems->head; i != bitems->tail; i = (i + 1) % bitems->size) {
 		if (bitems->list[i].offset == offset)
 			return;
 	}
@@ -395,13 +411,11 @@ static void add_bitem(bufitempool_t *bitems, off_t offset, unsigned char *data, 
 	memcpy((bitems->list)[bitems->tail].data, data, datalen);
 	bitems->tail = (bitems->tail + 1) % bitems->size;
 	bitems->nitems += 1;
-	fprintf(stderr, "Buffering item with offset %lld, datalen %hu, n = %d\n", offset, datalen, bitems->nitems);
+	printf("bitem added, head %d tail %d nitems %d\n", bitems->head, bitems->tail, bitems->nitems);
 }
 
 static void remove_bitem(bufitempool_t *bitems, int index)
 {
-	fprintf(stderr, "Removing [%d]th item with offset %zd from bitems\n", index, bitems->list[index].offset);
-
 	if (bitems->head == index) {
 		memset(&bitems->list[index], 0, sizeof(bufitem_t));
 		bitems->head = (bitems->head + 1) % bitems->size;
@@ -424,6 +438,7 @@ static void remove_bitem(bufitempool_t *bitems, int index)
 	} else {
 		return;
 	}
+	printf("bitem removed, head %d tail %d nitems %d\n", bitems->head, bitems->tail, bitems->nitems);
 }
 
 static void update_timer(wnditempool_t *witems, int index, struct timeval *tv)

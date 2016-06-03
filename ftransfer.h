@@ -7,7 +7,6 @@ typedef struct {
 	unsigned offset;
 	uint16_t seq;
 	uint16_t datalen;
-	int nacked;
 	struct timeval tv;
 } wnditem_t;
 

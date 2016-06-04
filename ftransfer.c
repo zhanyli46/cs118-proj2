@@ -85,7 +85,7 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 	
 	while (foffset != fsize) {
 		// assume no packet loss, no congestion window
-		// cwnd = 30*1032;
+		cwnd = 30*1032;
 		limit = (cwnd < rwnd) ? cwnd : rwnd;
 		availpack = (limit - bytesend) / PACKSIZE;
 
@@ -219,6 +219,46 @@ int ftransfer_recver(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 		if (bitems.nitems == 0)
 			continue;
 		pthread_mutex_lock(&bmutex);
+		if (bitems.nitems != 0) {
+			i = bitems.head;
+			do {
+				if (bitems.list[i].offset != foffset) {
+					i = (i + 1) % bitems.size;
+					continue;
+				}
+				// write next chunk of data
+				fprintf(stderr, "Write file at offset %zd for %zd bytes\n", foffset, bitems.list[i].datalen);
+				lseek(filefd, foffset, SEEK_SET);
+				if (write(filefd, bitems.list[i].data, bitems.list[i].datalen) < 0) {
+					fprintf(stderr, "Error: cannot write to file\n");
+				}
+				// update new file offset
+				foffset += bitems.list[i].datalen;
+
+				// send ack conditionally
+				printf("ack should be %lld, cur %hu\n", (foffset + initack) % MAXSEQNUM, nextack);
+				tempack = (foffset + initack) % MAXSEQNUM;
+				if ((tempack > nextack) ||
+					((tempack < nextack) && (nextack - tempack > OFTHRESH))) {
+					nextack = (foffset + initack) % MAXSEQNUM;
+					memset(packet, 0, PACKSIZE);
+					self->ack = nextack;
+					self->flag = (bitems.list[i].datalen << 3) | ACK;
+					fprintf(stderr, "Sending ACK packet %hu\n", nextack);
+					if (send_packet(packet, hinfo, self, other) < 0) {
+						fprintf(stderr, "Fatal error: cannot send ACK packet, aborting\n");
+						exit(2);
+					}
+				}
+				// remove the written item from buffer
+				remove_bitem(&bitems, i);
+				
+				i = (i + 1) % bitems.size;
+			} while (i != bitems.tail);
+		}
+		pthread_mutex_unlock(&bmutex);
+
+		/*
 		for (i = bitems.head; i != bitems.tail; i = (i + 1) % bitems.size) {
 			if (bitems.list[i].offset != foffset)
 				continue;
@@ -249,8 +289,7 @@ int ftransfer_recver(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 
 			// remove the written item from buffer
 			remove_bitem(&bitems, i);
-		}
-		pthread_mutex_unlock(&bmutex);
+		}*/
 	}
 
 	pthread_join(tid, NULL);

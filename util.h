@@ -15,7 +15,7 @@
 #define INITRWND 		30720
 #define INITCWND		PACKSIZE
 #define INITSSTHRESH	65535
-#define OFTHRESH		4096
+#define OFTHRESH		8192
 
 int is_numeric(const char *str);
 int is_ip_format(const char *str);

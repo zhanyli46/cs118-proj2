@@ -2,7 +2,6 @@
 #include "helper.h"
 #include "util.h"
 
-
 typedef struct {
 	unsigned offset;
 	uint16_t seq;

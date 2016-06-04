@@ -41,7 +41,7 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 	int nacked = 0;
 	ssize_t resendlen = 0;
 	
-	// thread control parameter
+	// thread sync control parameter
 	pthread_t tid;
 	int thrdstop = 0;
 
@@ -80,13 +80,15 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 	witems.list = calloc(witems.size, sizeof(wnditem_t));
 
 	lseek(filefd, 0, SEEK_SET);
-
-	
 	
 	while (foffset != fsize) {
 		// assume no packet loss, no congestion window
 		limit = (cwnd < rwnd) ? cwnd : rwnd;
 		availpack = (limit - bytesend) / PACKSIZE;
+
+		if (availpack == 0 && witems.nitems != 0 && nacked > 1) {
+		//	printf("here!\n");
+		}
 
 		for (i = 0; i < availpack; i++) {
 			memset(packet, 0, PACKSIZE);
@@ -115,7 +117,6 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 			}
 			foffset += bytesread;
 
-
 			// send packet
 			fprintf(stderr, "Sending data packet %hu %hu %hu\n", self->seq, cwnd, ssthresh);
 			if ((bsend = send_packet(packet, hinfo, self, other)) < 0) {
@@ -135,6 +136,7 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 	}
 
 	// wait for listening thread to finish
+	pthread_cancel(tid);
 	pthread_join(tid, NULL);
 	pthread_mutex_destroy(&wmutex);
 	return 0;
@@ -149,6 +151,7 @@ int ftransfer_recver(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 	unsigned char packet[PACKSIZE];
 	uint16_t initack = other->seq + 1;
 	uint16_t nextack = initack;
+	uint16_t tempack = 0;
 	bufitempool_t bitems;
 
 	// thread control
@@ -202,6 +205,23 @@ int ftransfer_recver(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 			}
 			// update new file offset
 			foffset += bitems.list[i].datalen;
+
+			// send ack conditionally
+			printf("ack should be %hu, cur %hu\n", (foffset + initack) % MAXSEQNUM, nextack);
+			tempack = (foffset + initack) % MAXSEQNUM;
+			if ((tempack > nextack) ||
+				((tempack < nextack) && (nextack - tempack > OFTHRESH))) {
+				nextack = (foffset + initack) % MAXSEQNUM;
+				memset(packet, 0, PACKSIZE);
+				self->ack = nextack;
+				self->flag = (bitems.list[i].datalen << 3) | ACK;
+				fprintf(stderr, "Sending ACK packet %hu\n", nextack);
+				if (send_packet(packet, hinfo, self, other) < 0) {
+					fprintf(stderr, "Fatal error: cannot send ACK packet, aborting\n");
+					exit(2);
+				}
+			}
+
 			// remove the written item from buffer
 			remove_bitem(&bitems, i);
 		}
@@ -243,14 +263,14 @@ static void *listen_ackpacket(void *userdata)
 			continue;
 		fprintf(stderr, "Receiving ACK packet %hu\n", other->ack);
 		printf("acknum = %d, received ack = %hu\n", *acknum, other->ack);
+
+		pthread_mutex_lock(&wmutex);
 		if (*acknum == other->ack) {
 			*nacked += 1;
 		} else {
 			*acknum = other->ack;
 			*nacked = 1;
 		}
-
-		pthread_mutex_lock(&wmutex);
 		for (i = witems->head; i != witems->tail; i = (i + 1) % witems->size) {
 			if ((witems->list[i].seq < *acknum) || 
 				((witems->list[i].seq > *acknum) && (witems->list[i].seq - *acknum > OFTHRESH))) {

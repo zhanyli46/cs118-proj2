@@ -77,5 +77,12 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
+	if (terminate_server(&hinfo, &self, &other)) {
+		fprintf(stderr, "Error terminating connection with the client via handshaking, force exiting\n");
+	}
+
+	// clean up
+
+
 	return 0;
 }

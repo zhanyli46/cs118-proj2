@@ -108,3 +108,89 @@ START:
 	self->seq += 1;
 	return 0;
 }
+
+
+int terminate_client(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
+{
+	unsigned char packet[PACKSIZE];
+	ssize_t inbytes, outbytes;
+
+	memset(packet, 0, PACKSIZE);
+	self->flag = ACK;
+	fprintf(stderr, "Sending ACK packet\n");
+	if ((outbytes = send_packet(packet, hinfo, self, other)) < 0) {
+		fprintf(stderr, "Error sending ACK packet\n");
+		return -1;
+	}
+
+	memset(packet, 0, PACKSIZE);
+	self->flag = FIN;
+	fprintf(stderr, "Sending FIN packet\n");
+	if ((outbytes = send_packet(packet, hinfo, self, other)) < 0) {
+		fprintf(stderr, "Error sending FIN packet\n");
+		return -1;
+	}
+
+	while ((inbytes = recv_packet(packet, hinfo, self, other)) >= 0) {
+		if (inbytes < 0) {
+			fprintf(stderr, "Error receiving ACK packet\n");
+			return -1;
+		} else if (other->flag == ACK) {
+			fprintf(stderr, "Receiving ACK packet\n");
+			break;
+		} else {
+			continue;
+		}
+	}
+
+	return 0;
+}
+
+int terminate_server(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
+{
+	unsigned char packet[PACKSIZE];
+	ssize_t inbytes, outbytes;
+	
+	memset(packet, 0, PACKSIZE);
+	self->flag = FIN;
+	fprintf(stderr, "Sending FIN packet\n");
+	if ((outbytes = send_packet(packet, hinfo, self, other)) < 0) {
+		fprintf(stderr, "Error sending FIN packet\n");
+		return -1;
+	}
+
+	memset(packet, 0, PACKSIZE);
+	while ((inbytes = recv_packet(packet, hinfo, self, other)) >= 0) {
+		if (inbytes < 0) {
+			fprintf(stderr, "Error receiving ACK reply\n");
+			return -1;
+		} else if (other->flag == ACK) {
+			fprintf(stderr, "Receiving ACK packet\n");
+			break;
+		} else {
+			continue;
+		}
+	}
+
+	while ((inbytes = recv_packet(packet, hinfo, self, other)) >= 0) {
+		if (inbytes < 0) {
+			fprintf(stderr, "Error receiving FIN packet\n");
+			return -1;
+		} else if (other->flag == FIN) {
+			fprintf(stderr, "Receiving FIN packet\n");
+			break;
+		} else {
+			continue;
+		}
+	}
+
+	memset(packet, 0, PACKSIZE);
+	self->flag = ACK;
+	fprintf(stderr, "Sending ACK packet\n");
+	if ((outbytes = send_packet(packet, hinfo, self, other)) < 0) {
+		fprintf(stderr, "Error sending ACK packet\n");
+		return -1;
+	}
+
+	return 0;
+}

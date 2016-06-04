@@ -50,7 +50,6 @@ typedef struct {
 	hostinfo_t *hinfo;
 	conninfo_t *self;
 	conninfo_t *other;
-	int *thrdstop;
 	bufitempool_t *bitems;
 	uint16_t initack;
 	uint16_t *nextack;

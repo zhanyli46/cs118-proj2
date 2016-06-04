@@ -8,7 +8,6 @@
 
 pthread_mutex_t wmutex;
 pthread_mutex_t bmutex;
-int aa = 0;
 
 int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *self, conninfo_t *other)
 {
@@ -90,10 +89,6 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 		availpack = (limit - bytesend) / PACKSIZE;
 
 		for (i = 0; i < availpack; i++) {
-			if (bytesread == fsize) {
-				nodata = 1;
-				break;
-			}
 			memset(packet, 0, PACKSIZE);
 			// read data
 			lseek(filefd, foffset, SEEK_SET);
@@ -112,7 +107,6 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 
 			while (1) {
 				if (witems.nitems < witems.size) {
-					
 					pthread_mutex_lock(&wmutex);
 					add_witem(&witems, foffset, self->seq, bytesread, &curtime);
 					pthread_mutex_unlock(&wmutex);
@@ -132,11 +126,18 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 		}
 
 	}
-	printf("waiting ...\n");
-	while (1);
 
+	while (1) {
+		if (witems.nitems == 0) {
+			thrdstop = 1;
+			break;
+		}
+	}
 
-	return -1;
+	// wait for listening thread to finish
+	pthread_join(tid, NULL);
+	pthread_mutex_destroy(&wmutex);
+	return 0;
 }
 
 int ftransfer_recver(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *self, conninfo_t *other)
@@ -152,7 +153,6 @@ int ftransfer_recver(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 
 	// thread control
 	pthread_t tid;
-	int thrdstop = 0;
 
 	// misc
 	int end = 0;
@@ -163,7 +163,6 @@ int ftransfer_recver(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 	ud.hinfo = hinfo;
 	ud.self = self;
 	ud.other = other;
-	ud.thrdstop = &thrdstop;
 	ud.bitems = &bitems;
 	ud.initack = initack;
 	ud.nextack = &nextack;
@@ -208,7 +207,10 @@ int ftransfer_recver(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 		}
 		pthread_mutex_unlock(&bmutex);
 	}
-	return -1;
+
+	pthread_join(tid, NULL);
+	pthread_mutex_destroy(&bmutex);
+	return 0;
 }
 
 static void *listen_ackpacket(void *userdata)
@@ -268,7 +270,7 @@ static void *listen_ackpacket(void *userdata)
 		
 	}
 	
-	return NULL;
+	pthread_exit(0);
 }
 
 static void *listen_datapacket(void *userdata)
@@ -278,7 +280,6 @@ static void *listen_datapacket(void *userdata)
 	hostinfo_t *hinfo = ud->hinfo;
 	conninfo_t *self = ud->self;
 	conninfo_t *other = ud->other;
-	int *thrdstop = ud->thrdstop;
 	bufitempool_t *bitems = ud->bitems;
 	uint16_t initack = ud->initack;
 	uint16_t *nextack = ud->nextack;
@@ -292,7 +293,7 @@ static void *listen_datapacket(void *userdata)
 	uint16_t lastseq = initack;
 	uint16_t deltaseq = 0;
 
-	while (!*thrdstop) {
+	while (1) {
 		// listen for packet
 		memset(packet, 0, PACKSIZE);
 		if (recv_packet(packet, hinfo, self, other) < 0) {
@@ -302,15 +303,14 @@ static void *listen_datapacket(void *userdata)
 		fprintf(stderr, "Receiving data packet %hu\n", other->seq);
 
 		if ((other->flag & 0x7) == FIN) {
+			fprintf(stderr, "Receiving FIN packet\n");
 			*end = 1;
 			break;
 		}
 
 		// check if seq has overflowed
 		deltaseq = (lastseq < other->seq) ? other->seq - lastseq : lastseq - other->seq;
-		printf("delta = %d\n", deltaseq);
 		if ((deltaseq > OFTHRESH) && (other->seq < lastseq)) {
-			printf("overflowed\n");
 			multiplier += 1;
 		}
 		offset = (unsigned)other->seq + multiplier * MAXSEQNUM - initack;
@@ -352,14 +352,11 @@ static void *listen_datapacket(void *userdata)
 			exit(2);
 		}
 	}
-
-	return NULL;
+	pthread_exit(0);
 }
 
 static void add_witem(wnditempool_t *witems, off_t offset, uint16_t seq, uint16_t datalen, struct timeval *tv)
 {
-	aa++;
-	printf("%d\n", aa);
 	(witems->list)[witems->tail].offset = offset;
 	(witems->list)[witems->tail].seq = seq;
 	(witems->list)[witems->tail].datalen = datalen;

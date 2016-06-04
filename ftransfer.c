@@ -40,6 +40,8 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 	uint16_t acknum = 0;
 	int nacked = 0;
 	ssize_t resendlen = 0;
+	int temphead = 0;
+	int temptail = 0;
 	
 	// thread sync control parameter
 	pthread_t tid;
@@ -83,12 +85,12 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 	
 	while (foffset != fsize) {
 		// assume no packet loss, no congestion window
+		// cwnd = 30*1032;
 		limit = (cwnd < rwnd) ? cwnd : rwnd;
 		availpack = (limit - bytesend) / PACKSIZE;
 
-		if (availpack == 0 && witems.nitems != 0 && nacked > 1) {
-		//	printf("here!\n");
-		}
+		/*if (availpack == 0 && witems.nitems != 0 && nacked > 1) {
+		}*/
 
 		for (i = 0; i < availpack; i++) {
 			memset(packet, 0, PACKSIZE);
@@ -105,7 +107,6 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 			self->flag = bytesread << 3;
 			// log operation as wnditem_t
 			gettimeofday(&curtime, NULL);
-		
 
 			while (1) {
 				if (witems.nitems < witems.size) {
@@ -125,6 +126,30 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 			}
 			bytesend += bsend;
 		}
+
+		/*
+		pthread_mutex_lock(&wmutex);
+		temphead = witems.head;
+		temptail = witems.tail;
+		pthread_mutex_unlock(&wmutex);
+		for (i = temphead; i != temptail; i = (i + 1) % witems.size) {
+			if (witems.list[i].seq < acknum) {
+				pthread_mutex_lock(&wmutex);
+				remove_witem(&witems, i);
+				pthread_mutex_unlock(&wmutex);
+				continue;
+			}
+			gettimeofday(&curtime, NULL);
+			d_sec = curtime.tv_sec - witems.list[i].tv.tv_sec;
+			d_usec = curtime.tv_usec - witems.list[i].tv.tv_usec;
+
+			if ((d_sec * SECTOUSEC + d_usec) > (TIMEOUT * MSECTOUSEC)) {
+				// timeout, retransmit segment
+				cwnd = INITCWND;
+				memset(packet, 0, PACKSIZE);
+			}
+		}
+		*/
 
 	}
 
@@ -207,7 +232,7 @@ int ftransfer_recver(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 			foffset += bitems.list[i].datalen;
 
 			// send ack conditionally
-			printf("ack should be %hu, cur %hu\n", (foffset + initack) % MAXSEQNUM, nextack);
+			printf("ack should be %lld, cur %hu\n", (foffset + initack) % MAXSEQNUM, nextack);
 			tempack = (foffset + initack) % MAXSEQNUM;
 			if ((tempack > nextack) ||
 				((tempack < nextack) && (nextack - tempack > OFTHRESH))) {
@@ -271,12 +296,16 @@ static void *listen_ackpacket(void *userdata)
 			*acknum = other->ack;
 			*nacked = 1;
 		}
-		for (i = witems->head; i != witems->tail; i = (i + 1) % witems->size) {
-			if ((witems->list[i].seq < *acknum) || 
-				((witems->list[i].seq > *acknum) && (witems->list[i].seq - *acknum > OFTHRESH))) {
-				*bytesend -= witems->list[i].datalen + HEADERSIZE;
-				remove_witem(witems, i);
-			}
+		if (witems->nitems != 0) {
+			i = witems->head;
+			do {
+				if ((witems->list[i].seq < *acknum) || 
+					((witems->list[i].seq > *acknum) && (witems->list[i].seq - *acknum > OFTHRESH))) {
+					*bytesend -= witems->list[i].datalen + HEADERSIZE;
+					remove_witem(witems, i);
+				}
+				i = (i + 1) % witems->size;
+			} while (i != witems->tail);
 		}
 		pthread_mutex_unlock(&wmutex);
 

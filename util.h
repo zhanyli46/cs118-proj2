@@ -16,6 +16,8 @@
 #define INITCWND		PACKSIZE
 #define INITSSTHRESH	65535
 #define OFTHRESH		8192
+#define SECTOUSEC		1000000
+#define MSECTOUSEC		1000
 
 int is_numeric(const char *str);
 int is_ip_format(const char *str);

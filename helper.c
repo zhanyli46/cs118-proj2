@@ -44,7 +44,6 @@ ssize_t send_packet(unsigned char* packet, hostinfo_t *hinfo, conninfo_t *self, 
 	ssize_t	outbytes;
 	fill_header(packet, &self->seq, &self->ack, &self->rwnd, &self->flag);
 
-
 	outbytes = sendto(hinfo->sockfd, packet, PACKSIZE, 0, (struct sockaddr *)hinfo->addr, hinfo->addrlen);
 	return outbytes;
 }

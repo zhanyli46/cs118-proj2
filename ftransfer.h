@@ -1,4 +1,4 @@
-#include <sys/time.h>
+#include <sys/time.h> 
 #include "helper.h"
 #include "util.h"
 
@@ -63,4 +63,3 @@ static void add_witem(wnditempool_t *witems, off_t offset, uint32_t seq, uint16_
 static void remove_witem(wnditempool_t *witems, int index);
 static void add_bitem(bufitempool_t *bitems, off_t offset, uint32_t seq, unsigned char *data, uint16_t datalen);
 static void remove_bitem(bufitempool_t *bitems, int index);
-static void update_timer(wnditempool_t *witems, int index, struct timeval *tv);

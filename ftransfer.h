@@ -3,7 +3,7 @@
 #include "util.h"
 
 typedef struct {
-	unsigned offset;
+	off_t offset;
 	uint16_t seq;
 	uint16_t datalen;
 	struct timeval tv;
@@ -32,7 +32,8 @@ typedef struct {
 } sendudata_t;
 
 typedef struct {
-	unsigned offset;
+	off_t offset;
+	uint16_t seq;
 	unsigned char *data;
 	uint16_t datalen;
 } bufitem_t;
@@ -62,6 +63,6 @@ static void *listen_ackpacket(void *userdata);
 static void *listen_datapacket(void *userdata);
 static void add_witem(wnditempool_t *witems, off_t offset, uint16_t seq, uint16_t datalen, struct timeval *tv);
 static void remove_witem(wnditempool_t *witems, int index);
-static void add_bitem(bufitempool_t *bitems, off_t offset, unsigned char  *data, uint16_t datalen);
+static void add_bitem(bufitempool_t *bitems, off_t offset, uint16_t seq, unsigned char  *data, uint16_t datalen);
 static void remove_bitem(bufitempool_t *bitems, int index);
 static void update_timer(wnditempool_t *witems, int index, struct timeval *tv);

@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=-std=c99 -ftrapv
+CFLAGS=-std=c99 -ftrapv -pthread
 
 all: server client
 
@@ -16,7 +16,7 @@ client.o: client.c
 	$(CC) $(CFLAGS) client.c -c
 
 ftransfer.o: ftransfer.c
-	$(CC) $(CFLAGS) -pthread ftransfer.c -c
+	$(CC) $(CFLAGS) ftransfer.c -c
 
 handshake.o: handshake.c
 	$(CC) $(CFLAGS) handshake.c -c

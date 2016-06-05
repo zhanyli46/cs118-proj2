@@ -41,7 +41,7 @@ int main(int argc, char **argv)
 	}
 	servAddr.sin_family = AF_INET;
 	servAddr.sin_port = htons(atoi(argv[1]));
-	servAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+	servAddr.sin_addr.s_addr = inet_addr("10.0.0.1");
 	memset(servAddr.sin_zero, 0, 8);
 	servAddrLen = sizeof(struct sockaddr);
 	if ((exstat = bind(sockfd, (struct sockaddr *)&servAddr, servAddrLen) != 0)) {

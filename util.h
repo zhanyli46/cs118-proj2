@@ -4,8 +4,8 @@
 #include <stdint.h>
 #include <arpa/inet.h>
 
-#define PACKSIZE		1032
-#define DATASIZE		1016
+#define PACKSIZE		1024
+#define DATASIZE		1008
 #define HEADERSIZE		8
 #define MAGICSIZE		16
 #define FIN				0x1

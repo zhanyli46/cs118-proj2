@@ -2,6 +2,8 @@
 #include "helper.h"
 #include "util.h"
 
+#include <stdio.h>
+
 
 void fill_header(unsigned char *p, uint16_t *seq, uint16_t *ack, uint16_t *rwnd, uint16_t *flag)
 {
@@ -39,12 +41,13 @@ void interpret_header(unsigned char *p, uint16_t *seq, uint16_t *ack, uint16_t *
 	string_to_ushort(sflag, flag);
 }
 
-ssize_t send_packet(unsigned char* packet, hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
+ssize_t send_packet(unsigned char* packet, hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other, ssize_t datalen)
 {
 	ssize_t	outbytes;
 	fill_header(packet, &self->seq, &self->ack, &self->rwnd, &self->flag);
 
-	outbytes = sendto(hinfo->sockfd, packet, PACKSIZE, 0, (struct sockaddr *)hinfo->addr, hinfo->addrlen);
+	outbytes = sendto(hinfo->sockfd, packet, datalen, 0, (struct sockaddr *)hinfo->addr, hinfo->addrlen);
+	printf("outbyte = %d\n", outbytes);
 	return outbytes;
 }
 
@@ -54,6 +57,7 @@ ssize_t recv_packet(unsigned char* packet, hostinfo_t *hinfo, conninfo_t *self, 
 	if ((inbytes = recv(hinfo->sockfd, packet, PACKSIZE, 0)) >= 0) {
 		interpret_header(packet, &other->seq, &other->ack, &other->rwnd, &other->flag);
 	}
+	printf("inbytes = %d\n", inbytes);
 
 	return inbytes;
 }

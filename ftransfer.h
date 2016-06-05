@@ -35,6 +35,7 @@ typedef struct {
 	uint32_t seq;
 	unsigned char *data;
 	uint16_t datalen;
+	int buffered;
 } bufitem_t;
 
 typedef struct {
@@ -51,8 +52,9 @@ typedef struct {
 	conninfo_t *other;
 	uint16_t *initack;
 	off_t *recvoffset;
+	off_t *bufoffset;
 	bufitempool_t *bitems;
-	int *end;
+	int *eof;
 } recvudata_t;
 
 int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *self, conninfo_t *other);

@@ -17,7 +17,7 @@ int handshake_client(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other, siz
 
 	// send SYN + sequence number
 	fprintf(stdout, "Sending SYN packet\n");
-	if ((outbytes = send_packet(packet, hinfo, self, other)) < 0)
+	if ((outbytes = send_packet(packet, hinfo, self, other, PACKSIZE)) < 0)
 		return -1;
 
 
@@ -44,7 +44,7 @@ int handshake_client(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other, siz
 
 	// send ACK
 	fprintf(stdout, "Sending ACK packet\n");
-	if ((outbytes = send_packet(packet, hinfo, self, other)) < 0)
+	if ((outbytes = send_packet(packet, hinfo, self, other, PACKSIZE)) < 0)
 		return -1;
 	return 0;
 }
@@ -88,7 +88,7 @@ START:
 
 	// send SYN + ACK
 	fprintf(stdout, "Sending SYN/ACK packet\n");
-	if ((outbytes = send_packet(packet, hinfo, self, other)) < 0)
+	if ((outbytes = send_packet(packet, hinfo, self, other, PACKSIZE)) < 0)
 		goto START;
 	
 
@@ -117,7 +117,7 @@ int terminate_client(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
 	memset(packet, 0, PACKSIZE);
 	self->flag = ACK;
 	fprintf(stderr, "Sending ACK packet\n");
-	if ((outbytes = send_packet(packet, hinfo, self, other)) < 0) {
+	if ((outbytes = send_packet(packet, hinfo, self, other, PACKSIZE)) < 0) {
 		fprintf(stderr, "Error sending ACK packet\n");
 		return -1;
 	}
@@ -125,7 +125,7 @@ int terminate_client(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
 	memset(packet, 0, PACKSIZE);
 	self->flag = FIN;
 	fprintf(stderr, "Sending FIN packet\n");
-	if ((outbytes = send_packet(packet, hinfo, self, other)) < 0) {
+	if ((outbytes = send_packet(packet, hinfo, self, other, PACKSIZE)) < 0) {
 		fprintf(stderr, "Error sending FIN packet\n");
 		return -1;
 	}
@@ -153,7 +153,7 @@ int terminate_server(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
 	memset(packet, 0, PACKSIZE);
 	self->flag = FIN;
 	fprintf(stderr, "Sending FIN packet\n");
-	if ((outbytes = send_packet(packet, hinfo, self, other)) < 0) {
+	if ((outbytes = send_packet(packet, hinfo, self, other, PACKSIZE)) < 0) {
 		fprintf(stderr, "Error sending FIN packet\n");
 		return -1;
 	}
@@ -186,7 +186,7 @@ int terminate_server(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
 	memset(packet, 0, PACKSIZE);
 	self->flag = ACK;
 	fprintf(stderr, "Sending ACK packet\n");
-	if ((outbytes = send_packet(packet, hinfo, self, other)) < 0) {
+	if ((outbytes = send_packet(packet, hinfo, self, other, PACKSIZE)) < 0) {
 		fprintf(stderr, "Error sending ACK packet\n");
 		return -1;
 	}

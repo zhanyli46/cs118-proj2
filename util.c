@@ -98,12 +98,12 @@ void string_to_ushort(unsigned char *str, uint16_t* ushort)
 	*ushort =  lo | ((uint16_t)hi) << 8;
 }
 
-void fsize_to_string(size_t *fsize, unsigned char *str)
+void uint_to_string(uint32_t *uint, unsigned char *str)
 {
-	unsigned char c3 = *fsize & 0xff;
-	unsigned char c2 = (*fsize >> 8) & 0xff;
-	unsigned char c1 = (*fsize >> 16) & 0xff;
-	unsigned char c0 = (*fsize >> 24) & 0xff;
+	unsigned char c3 = *uint & 0xff;
+	unsigned char c2 = (*uint >> 8) & 0xff;
+	unsigned char c1 = (*uint >> 16) & 0xff;
+	unsigned char c0 = (*uint >> 24) & 0xff;
 
 	str[0] = c0;
 	str[1] = c1;
@@ -111,12 +111,11 @@ void fsize_to_string(size_t *fsize, unsigned char *str)
 	str[3] = c3;
 }
 
-void string_to_fsize(unsigned char *str, size_t *fsize)
+void string_to_uint(unsigned char *str, uint32_t *uint)
 {
 	unsigned char c0 = str[0];
 	unsigned char c1 = str[1];
 	unsigned char c2 = str[2];
 	unsigned char c3 = str[3];
-
-	*fsize = c3 | ((size_t)c2) << 8 | ((size_t)c1) << 16 | ((size_t)c0) << 24;
+	*uint = c3 | ((uint32_t)c2) << 8 | ((uint32_t)c1) << 16 | ((uint32_t)c0) << 24;
 }

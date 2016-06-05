@@ -34,7 +34,6 @@ int handshake_client(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other, siz
 		}
 	}
 
-	payload_fsize(packet, fsize);
 
 	// set connection parameters
 	self->seq += 1;
@@ -85,7 +84,6 @@ START:
 	self->flag = SYN | ACK;
 	self->ack = nextseq;
 	memset(packet, 0, PACKSIZE);
-	fsize_payload(packet, fsize);
 
 	// send SYN + ACK
 	fprintf(stdout, "Sending SYN/ACK packet\n");

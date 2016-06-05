@@ -2,8 +2,6 @@
 #include "helper.h"
 #include "util.h"
 
-#include <stdio.h>
-
 
 void fill_header(unsigned char *p, uint16_t *seq, uint16_t *ack, uint16_t *rwnd, uint16_t *flag)
 {
@@ -46,6 +44,7 @@ ssize_t send_packet(unsigned char* packet, hostinfo_t *hinfo, conninfo_t *self, 
 	ssize_t	outbytes;
 	fill_header(packet, &self->seq, &self->ack, &self->rwnd, &self->flag);
 
+
 	outbytes = sendto(hinfo->sockfd, packet, PACKSIZE, 0, (struct sockaddr *)hinfo->addr, hinfo->addrlen);
 	return outbytes;
 }
@@ -60,22 +59,32 @@ ssize_t recv_packet(unsigned char* packet, hostinfo_t *hinfo, conninfo_t *self, 
 	return inbytes;
 }
 
-void fsize_payload(unsigned char *p, size_t fsize)
+void magic_send(unsigned char *p, uint32_t *arg1, uint32_t *arg2)
 {
-	unsigned char size[4];
-	fsize_to_string(&fsize, size);
-	memcpy(p + HEADERSIZE, size, 1);
-	memcpy(p + HEADERSIZE + 1, size + 1, 1);
-	memcpy(p + HEADERSIZE + 2, size + 2, 1);
-	memcpy(p + HEADERSIZE + 3, size + 3, 1);
+	unsigned char uarg1[4], uarg2[4];
+	uint_to_string(arg1, uarg1);
+	uint_to_string(arg2, uarg2);
+	memcpy(p + HEADERSIZE, uarg1, 1);
+	memcpy(p + HEADERSIZE + 1, uarg1 + 1, 1);
+	memcpy(p + HEADERSIZE + 2, uarg1 + 2, 1);
+	memcpy(p + HEADERSIZE + 3, uarg1 + 3, 1);
+	memcpy(p + HEADERSIZE + 4, uarg2, 1);
+	memcpy(p + HEADERSIZE + 5, uarg2 + 1, 1);
+	memcpy(p + HEADERSIZE + 6, uarg2 + 2, 1);
+	memcpy(p + HEADERSIZE + 7, uarg2 + 3, 1);
 }
 
-void payload_fsize(unsigned char *p, size_t *fsize)
+void magic_recv(unsigned char *p, uint32_t *arg1, uint32_t *arg2)
 {
-	unsigned char size[4];
-	memcpy(size, p + HEADERSIZE, 1);
-	memcpy(size + 1, p + HEADERSIZE + 1, 1);
-	memcpy(size + 2, p + HEADERSIZE + 2, 1);
-	memcpy(size + 3, p + HEADERSIZE + 3, 1);
-	string_to_fsize(size, fsize);
+	unsigned char uarg1[4], uarg2[4];
+	memcpy(uarg1, p + HEADERSIZE, 1);
+	memcpy(uarg1 + 1, p + HEADERSIZE + 1, 1);
+	memcpy(uarg1 + 2, p + HEADERSIZE + 2, 1);
+	memcpy(uarg1 + 3, p + HEADERSIZE + 3, 1);
+	memcpy(uarg2, p + HEADERSIZE + 4, 1);
+	memcpy(uarg2 + 1, p + HEADERSIZE + 5, 1);
+	memcpy(uarg2 + 2, p + HEADERSIZE + 6, 1);
+	memcpy(uarg2 + 3, p + HEADERSIZE + 7, 1);
+	string_to_uint(uarg1, arg1);
+	string_to_uint(uarg2, arg2);
 }

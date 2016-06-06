@@ -20,6 +20,7 @@
 #define TIMETHRESH		8192
 #define SECTOUSEC		1000000
 #define MSECTOUSEC		1000
+#define BUFTHRESH		INITRWND
 
 int is_numeric(const char *str);
 int is_ip_format(const char *str);

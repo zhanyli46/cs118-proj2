@@ -292,24 +292,13 @@ int ftransfer_recver(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 	bitems.list = calloc(bitems.size, sizeof(bufitem_t));
 
 	lseek(filefd, 0, SEEK_SET);
-	i = 0;
+
 	while (!end) {
-
-		if (bitems.nitems == 0)
-			continue;
-
-		if (bitems.list[i].buffered) {
-			// save buffered data to local file
-			if (bufoffset > bitems.list[i].offset) {
-				// remove data that has already been written to file
-				pthread_mutex_lock(&bmutex);
-				remove_bitem(&bitems, i);
-				pthread_mutex_unlock(&bmutex);
-
-			} else if (bufoffset == bitems.list[i].offset) {
+		pthread_mutex_lock(&bmutex);
+		for (i = bitems.head; i != bitems.tail; i = (i + 1) % bitems.size) {
+			if (bitems.list[i].offset == bufoffset) {
 				// write next chunk of data
 				fprintf(stderr, "Write file at offset %zd for %zd bytes\n", bufoffset, bitems.list[i].datalen);
-				lseek(filefd, bufoffset, SEEK_SET);
 				if (write(filefd, bitems.list[i].data, bitems.list[i].datalen) < 0) {
 					fprintf(stderr, "Error: cannot write to file\n");
 				}
@@ -317,15 +306,15 @@ int ftransfer_recver(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 				bufoffset += bitems.list[i].datalen;
 
 				// remove data from buffer
-				pthread_mutex_lock(&bmutex);
 				remove_bitem(&bitems, i);
-				pthread_mutex_unlock(&bmutex);
+			} else if (bitems.list[i].offset < bufoffset) {
+				// remove data from buffer
+				remove_bitem(&bitems, i);
 			}
 		}
-		i = (i + 1) % bitems.size;
-		end = eof && (bitems.nitems == 0) && (bufoffset == recvoffset);
+		pthread_mutex_unlock(&bmutex);
+		end = eof && (bufoffset == recvoffset);
 	}
-	printf("here?\n");
 
 	pthread_join(tid, NULL);
 	pthread_mutex_destroy(&bmutex);
@@ -389,6 +378,7 @@ static void *listen_datapacket(void *userdata)
 			*recvoffset += datalen;
 
 			// update recvoffset using buffered data
+			pthread_mutex_lock(&bmutex);
 			if (bitems->nitems != 0) {
 				i = bitems->head;
 				do {
@@ -397,6 +387,7 @@ static void *listen_datapacket(void *userdata)
 					i = (i + 1) % bitems->size;
 				} while (i != bitems->tail);
 			}
+			pthread_mutex_unlock(&bmutex);
 			// send ACK
 			memset(packet, 0, PACKSIZE);
 			*param1 = 0;
@@ -413,7 +404,7 @@ static void *listen_datapacket(void *userdata)
 				exit(2);
 			}
 			goto CONT;
-		} else if (*param1 > *recvoffset) {
+		} else if ((*param1 > *recvoffset) && (*param1 > *recvoffset + BUFTHRESH)) {
 			// add to buffer
 			while (1) {
 				pthread_mutex_lock(&bmutex);
@@ -509,6 +500,7 @@ static void add_bitem(bufitempool_t *bitems, off_t offset, uint32_t seq, unsigne
 {
 	int temp = bitems->tail;
 
+ 
 	int i = bitems->head;
 	if (bitems->nitems != 0) {
 		do {
@@ -517,16 +509,15 @@ static void add_bitem(bufitempool_t *bitems, off_t offset, uint32_t seq, unsigne
 			i = (i + 1) % bitems->size;
 		} while (i != bitems->tail);
 	}
-	bitems->list[bitems->tail].offset = offset;
-	bitems->list[bitems->tail].seq = seq;
-	bitems->list[bitems->tail].datalen = datalen;
-	bitems->list[bitems->tail].data = malloc(datalen);
-	bitems->list[bitems->tail].buffered = 1;
-	memcpy(bitems->list[bitems->tail].data, data, datalen);
+	(bitems->list)[(bitems->tail)].offset = offset;
+	(bitems->list)[(bitems->tail)].seq = seq;
+	(bitems->list)[(bitems->tail)].datalen = datalen;
+	(bitems->list)[(bitems->tail)].data = malloc(datalen);
+	memcpy((bitems->list)[(bitems->tail)].data, data, datalen);
 	bitems->tail = (bitems->tail + 1) % bitems->size;
 	bitems->nitems += 1;
 
-	printf("###### adding bitems->nitems = %d at %lld , [%d]\n", bitems->nitems, offset, temp);
+	printf("###### adding at %lld , head %d tail %d [%d]\n", offset, bitems->head, bitems->tail, temp);
 }
 
 static void remove_bitem(bufitempool_t *bitems, int index)
@@ -535,7 +526,15 @@ static void remove_bitem(bufitempool_t *bitems, int index)
 
 	if (bitems->nitems == 0)
 		return;
-	if (bitems->head == index) {
+
+	if (bitems->tail == index) {
+		memset(&bitems->list[0], 0, sizeof(bufitem_t));
+		if (bitems->tail == 0) {
+			bitems->tail = bitems->size - 1;
+		} else
+			bitems->tail -= 1;
+		bitems->nitems -= 1;
+	} else if (bitems->head == index) {
 		memset(&bitems->list[index], 0, sizeof(bufitem_t));
 		bitems->head = (bitems->head + 1) % bitems->size;
 		bitems->nitems -= 1;
@@ -557,5 +556,5 @@ static void remove_bitem(bufitempool_t *bitems, int index)
 	} else {
 		return;
 	}
-	printf("$$$$$$ removing bitems->nitems = %d from %lld, [%d]\n", bitems->nitems, temp, index);
+	printf("$$$$$$ removing from %lld, head %d tail %d [%d]\n", temp, bitems->head, bitems->tail, index);
 }

@@ -35,7 +35,6 @@ typedef struct {
 	uint32_t seq;
 	unsigned char *data;
 	uint16_t datalen;
-	int buffered;
 } bufitem_t;
 
 typedef struct {

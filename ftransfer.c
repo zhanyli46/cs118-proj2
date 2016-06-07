@@ -193,7 +193,8 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 					goto UPDATE;
 				} 
 				ssthresh = cwnd / 2;
-				ssthresh = (ssthresh < 2 * INITCWND) ? 2 * INITCWND : ssthresh;
+				if (ssthresh < INITCWND * 2)
+					ssthresh = INITCWND * 2;
 				cwnd = INITCWND;
 				gettimeofday(&witems.list[i].tv, NULL);
 				//fprintf(stdout, "Sending data packet %hu %hu %hu Retransmission timeout offset %lld\n",
@@ -307,7 +308,8 @@ static void *listen_ackpacket(void *userdata)
 				pthread_mutex_unlock(&wmutex);
 			}
 			*ssthresh = *cwnd / 2;
-			*ssthresh = (*ssthresh < 2 * INITCWND) ? 2 * INITCWND : *ssthresh;
+			if (*ssthresh < INITCWND * 2)
+				*ssthresh = INITCWND * 2;
 			*cwnd = INITCWND;
 			nacked = 1;
 			continue;

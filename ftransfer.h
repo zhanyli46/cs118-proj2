@@ -2,6 +2,12 @@
 #include "helper.h"
 #include "util.h"
 
+typedef enum {
+	T_RESENDREQ,
+	T_RESENDBEG,
+	T_RESENDFIN
+} resendstat_t;
+
 typedef struct {
 	off_t offset;
 	uint32_t seq;
@@ -21,12 +27,15 @@ typedef struct {
 	hostinfo_t *hinfo;
 	conninfo_t *self;
 	conninfo_t *other;
+	int filefd;
 	int *thrdstop;
-	uint16_t *cwnd;
-	uint16_t *ssthresh;
+	uint32_t *cwnd;
+	uint32_t *ssthresh;
 	uint16_t *rwnd;
 	ssize_t *bytesonwire;
+	off_t *sendoffset;
 	off_t *recvoffset;
+	resendstat_t *resendstat;
 	wnditempool_t *witems;
 } sendudata_t;
 

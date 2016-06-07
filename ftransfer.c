@@ -22,7 +22,8 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 	// file read control parameters
 	off_t sendoffset = 0;
 	off_t recvoffset = 0;
-	off_t tempoffset = 0;
+	off_t faroffset = 0;
+	off_t tempoffset = -1;
 	ssize_t bytesonwire = 0;
 	ssize_t bsend = 0;
 	ssize_t bytesacked = 0;
@@ -86,11 +87,7 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 	lseek(filefd, 0, SEEK_SET);
 	
 	while (!end) {
-		// assume no packet loss, no congestion window
-		cwnd = PACKSIZE * 5;
-		limit = (cwnd < rwnd) ? cwnd : rwnd;
-		availpack = (limit - bytesonwire) / PACKSIZE;
-
+		RESEND:
 		// prepare to resend
 		pthread_mutex_lock(&wmutex);
 		if (resendstat == T_RESENDREQ) {
@@ -106,6 +103,11 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 		}
 		pthread_mutex_unlock(&wmutex);
 
+		// assume no packet loss, no congestion window
+		//cwnd = PACKSIZE * 5;
+		limit = (cwnd < rwnd) ? cwnd : rwnd;
+		availpack = (limit - bytesonwire) / PACKSIZE;
+
 
 		// when there's more data to read
 		for (i = 0; i < availpack; i++) {
@@ -116,18 +118,27 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 			// read data
 			pthread_mutex_lock(&wmutex);
 			lseek(filefd, sendoffset, SEEK_SET);
+			if (resendstat == T_RESENDREQ) {
+				pthread_mutex_unlock(&wmutex);
+				goto RESEND;
+			}
 			if ((bytesread = read(filefd, packet + MAGICSIZE, DATASIZE)) < 0) {
 					fprintf(stderr, "Error reading file\n");
 				return -1;
 			} else if (bytesread == 0) {
 				break;
 			}
+			faroffset = (faroffset < sendoffset) ? sendoffset : faroffset;
 			fprintf(stderr, "Reading at offset %zd for %zd bytes\n", sendoffset, bytesread);
 			param1 = (uint32_t)sendoffset;
 			param2 = 0;
 			self->seq = (param1 + initseq) % MAXSEQNUM;
 			
 			while (1) {
+				/*if (resendstat == T_RESENDREQ) {
+					pthread_mutex_unlock(&witems);
+					goto RESEND;
+				}*/
 				if (witems.nitems < witems.size) {
 					gettimeofday(&curtime, NULL);
 					add_witem(&witems, sendoffset, self->seq, bytesread, &curtime);
@@ -138,7 +149,11 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 			
 			// send packet
 			//fprintf(stderr, "Sending data packet %hu %hu %hu\n", self->seq, cwnd, ssthresh);
-			fprintf(stderr, "Sending data packet %lld %hu %hu\n", param1, cwnd, ssthresh);
+			if (sendoffset < faroffset)
+				fprintf(stderr, "Sending data packet %lld %u %u Retransmission\n", param1, cwnd, ssthresh);
+			else
+				fprintf(stderr, "Sending data packet %lld %u %u\n", param1, cwnd, ssthresh);
+
 			magic_send(packet, &param1, &param2);
 			if ((bsend = send_packet(packet, hinfo, self, other, bytesread + MAGICSIZE)) < 0) {
 				fprintf(stderr, "Error sending packet\n");
@@ -159,7 +174,6 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 
 			if ((d_sec * SECTOUSEC + d_usec) > (TIMEOUT * MSECTOUSEC)) {
 				memset(packet, 0, PACKSIZE);
-				cwnd = INITCWND;
 				lseek(filefd, witems.list[i].offset, SEEK_SET);
 				// re-read the data at offset
 				if ((bytesread = read(filefd, packet + MAGICSIZE, witems.list[i].datalen)) < 0) {
@@ -178,10 +192,13 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 					pthread_mutex_unlock(&wmutex);
 					goto UPDATE;
 				} 
+				ssthresh = cwnd / 2;
+				ssthresh = (ssthresh < 2 * INITCWND) ? 2 * INITCWND : ssthresh;
+				cwnd = INITCWND;
 				gettimeofday(&witems.list[i].tv, NULL);
 				//fprintf(stdout, "Sending data packet %hu %hu %hu Retransmission timeout offset %lld\n",
 				//	self->seq, cwnd, ssthresh, witems.list[i].offset);
-				fprintf(stdout, "Sending data packet %lld %hu %hu Retransmission timeout offset %lld\n",
+				fprintf(stdout, "Sending data packet %lld %u %u Retransmission timeout offset %lld\n",
 					param1, cwnd, ssthresh, witems.list[i].offset);
 				if (send_packet(packet, hinfo, self, other, witems.list[i].datalen + MAGICSIZE) < 0) {
 					fprintf(stderr, "Error sending retransmission packet\n");
@@ -247,6 +264,9 @@ static void *listen_ackpacket(void *userdata)
 
 		magic_recv(packet, param1, param2);
 
+		//fprintf(stderr, "Receiving ACK packet %hu\n", other->ack);
+		fprintf(stderr, "Receiving ACK packet %lld\n", *param2);
+
 		// count duplicated ACK
 		if (lastack != *param2) {
 			lastack = *param2;
@@ -256,7 +276,8 @@ static void *listen_ackpacket(void *userdata)
 		}
 
 		// trigger duplicate ACK retransmission
-		if (nacked > 3) {
+		fprintf(stderr, "ACK log: last received ack = %u, nacked = %d\n", lastack, nacked);
+		if (nacked >= 3) {
 			pthread_mutex_lock(&wmutex);
 			printf("resendstat = %d\n", *resendstat);
 			*resendstat = T_RESENDREQ;
@@ -269,17 +290,9 @@ static void *listen_ackpacket(void *userdata)
 				if (*resendstat == T_RESENDBEG) {
 					printf("actual resend\n");
 					// remove all witems from current buffer
-			
-					// ## buggy loop that causes segfault
 					while (witems->nitems > 0) {
 						remove_witem(witems, witems->head);
 					}
-					/*
-					for (i = witems->head; i != witems->tail; i = (i + 1) % witems->size) {
-						printf("removing [%d] item\n", i);
-						remove_witem(&witems, i);
-					}*/
-					// ##
 
 					printf("nitems = %d, head %d tail %d\n", witems->nitems, witems->head, witems->tail);
 					*bytesonwire = 0;
@@ -293,13 +306,19 @@ static void *listen_ackpacket(void *userdata)
 				}
 				pthread_mutex_unlock(&wmutex);
 			}
-
+			*ssthresh = *cwnd / 2;
+			*ssthresh = (*ssthresh < 2 * INITCWND) ? 2 * INITCWND : *ssthresh;
+			*cwnd = INITCWND;
 			nacked = 1;
 			continue;
 		}
 
-		//fprintf(stderr, "Receiving ACK packet %hu\n", other->ack);
-		fprintf(stderr, "Receiving ACK packet %lld\n", *param2);
+		// speed up transmission
+		if (*cwnd < *ssthresh)
+			*cwnd *= 2;
+		else
+			*cwnd += INITCWND;
+
 
 		*recvoffset = (*param2 > *recvoffset) ? *param2 : *recvoffset;
 		printf("recvoffset = %lld\n", *recvoffset);
@@ -311,9 +330,6 @@ static void *listen_ackpacket(void *userdata)
 					*bytesonwire -= witems->list[i].datalen + MAGICSIZE;
 					remove_witem(witems, i);
 					pthread_mutex_unlock(&wmutex);
-
-					// speed up transmission
-
 				}
 				i = (i + 1) % witems->size;
 			} while (i != witems->tail);

@@ -1,6 +1,8 @@
 #include <string.h>
 #include <stdio.h>	
 #include <unistd.h>
+#include <sys/ioctl.h>
+#include <sys/time.h>
 #include "handshake.h"
 
 int handshake_client(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other, size_t *fsize)
@@ -8,6 +10,9 @@ int handshake_client(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other, siz
 	unsigned char packet[PACKSIZE];
 	ssize_t inbytes, outbytes;
 	uint16_t nextseq;
+	struct timeval begin, end;
+	int bytesavail = -1;
+	int resend = 0;
 
 	// set connection parameters
 	self->seq = init_seqnum();
@@ -16,11 +21,34 @@ int handshake_client(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other, siz
 	memset(packet, 0, PACKSIZE);
 
 	// send SYN + sequence number
-	fprintf(stdout, "Sending SYN packet\n");
+	CRESEND1:
+	if (resend == 0)
+		fprintf(stdout, "Sending SYN packet\n");
+	else {
+		fprintf(stdout, "Sending SYN packet Retransmission\n");
+		resend = 0;
+	}
+	gettimeofday(&begin, NULL);
 	if ((outbytes = send_packet(packet, hinfo, self, other, PACKSIZE)) < 0)
 		return -1;
 
-
+	while (1) {
+		// check socket buffer
+		ioctl(hinfo->sockfd, FIONREAD, &bytesavail);
+		if (bytesavail == 0) {
+			gettimeofday(&end, NULL);
+			if ((end.tv_sec - begin.tv_sec) * 1000000 + (end.tv_usec - begin.tv_usec) > TIMEOUT * 1000) {
+				resend = 1;
+				goto CRESEND1;
+			}
+		} else if (bytesavail < 1) {
+			// error
+			return -1;
+		} else {
+			break;
+		}
+	}
+	
 	memset(packet, 0, PACKSIZE);
 	// recv packet and check flag (SYN + ACK)
 	while ((inbytes = recv_packet(packet, hinfo, self, other)) >= 0) {
@@ -31,6 +59,7 @@ int handshake_client(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other, siz
 			nextseq = other->seq + 1;
 			break;
 		} else { 
+			memset(packet, 0, PACKSIZE);
 			continue;
 		}
 	}
@@ -42,10 +71,35 @@ int handshake_client(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other, siz
 	self->ack = nextseq;
 	memset(packet, 0, PACKSIZE);
 
+
+	CRESEND2:
 	// send ACK
-	fprintf(stdout, "Sending ACK packet\n");
+	if (resend == 0)
+		fprintf(stdout, "Sending ACK packet\n");
+	else {
+		fprintf(stdout, "Sending ACK packet Retransmission\n");
+		resend = 0;
+	}
+	gettimeofday(&begin, NULL);
 	if ((outbytes = send_packet(packet, hinfo, self, other, PACKSIZE)) < 0)
 		return -1;
+
+	while (1) {
+		// check socket buffer
+		ioctl(hinfo->sockfd, FIONREAD, &bytesavail);
+		if (bytesavail == 0) {
+			gettimeofday(&end, NULL);
+			if ((end.tv_sec - begin.tv_sec) * 1000000 + (end.tv_usec - begin.tv_usec) > TIMEOUT * 1000) {
+				resend = 1;
+				goto CRESEND2;
+			}
+		} else if (bytesavail < 0) {
+			// error
+			return -1;
+		} else {
+			break;
+		}
+	}
 	return 0;
 }
 
@@ -55,6 +109,9 @@ int handshake_server(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
 	ssize_t inbytes, outbytes;
 	uint16_t nextseq;
 	size_t fsize = 0;
+	struct timeval begin, end;
+	int bytesavail = -1;
+	int resend = 0;
 
 	fsize = self->seq * 65536 + self->ack;
 
@@ -62,12 +119,30 @@ int handshake_server(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
 	self->ack = 0;
 	self->flag = 0;
 
+
+
 START:
+	while (1) {
+		// check socket buffer
+		ioctl(hinfo->sockfd, FIONREAD, &bytesavail);
+		if (bytesavail == 0) {
+			continue;
+		} else if (bytesavail < 1) {
+			// error
+			return -1;
+		} else {
+			break;
+		}
+	}
+
 	// recv for the first time, expecting SYN; store client information in hinfo
 	memset(packet, 0, PACKSIZE);
-	while ((inbytes = recvfrom(hinfo->sockfd, packet, PACKSIZE, 0, (struct sockaddr *)hinfo->addr, &hinfo->addrlen) >= 0)) {
+	memset(other, 0, sizeof(conninfo_t));
+	while ((inbytes = recvfrom(hinfo->sockfd, packet, PACKSIZE, 0, (struct sockaddr *)hinfo->addr, &hinfo->addrlen))) {
 		interpret_header(packet, &other->seq, &other->ack, &other->rwnd, &other->flag);
-		
+		if (inbytes < 0) {
+			perror("recvfrom");
+		}
 		if (other->flag & SYN) {
 			// received SYN (TCP-like connection initiation)
 			fprintf(stdout, "Receiving SYN packet\n");
@@ -75,6 +150,7 @@ START:
 			break;
 		} else {
 			// unknown flag, ignore packet
+			memset(packet, 0, PACKSIZE);
 			continue;
 		}
 	}
@@ -86,10 +162,34 @@ START:
 	self->ack = nextseq;
 	memset(packet, 0, PACKSIZE);
 
+
+	SRESEND1:
 	// send SYN + ACK
-	fprintf(stdout, "Sending SYN/ACK packet\n");
+	if (resend == 0)
+		fprintf(stdout, "Sending SYN/ACK packet\n");
+	else
+		fprintf(stdout, "Sending SYN/ACK packet Retransmission\n");
+	gettimeofday(&begin, NULL);
 	if ((outbytes = send_packet(packet, hinfo, self, other, PACKSIZE)) < 0)
 		goto START;
+
+
+	while (1) {
+		// check socket buffer
+		ioctl(hinfo->sockfd, FIONREAD, &bytesavail);
+		if (bytesavail == 0) {
+			gettimeofday(&end, NULL);
+			if ((end.tv_sec - begin.tv_sec) * 1000000 + (end.tv_usec - begin.tv_usec) > TIMEOUT * 1000) {
+				resend = 1;
+				goto SRESEND1;
+			}
+		} else if (bytesavail < 0) {
+			// error
+			return -1;
+		} else {
+			break;
+		}
+	}
 	
 
 	memset(packet, 0, PACKSIZE);
@@ -101,6 +201,7 @@ START:
 			fprintf(stdout, "Receiving ACK packet\n");
 			break;
 		} else { 
+			memset(packet, 0, PACKSIZE);
 			continue;
 		}
 	}
@@ -115,18 +216,10 @@ int terminate_client(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
 	ssize_t inbytes, outbytes;
 
 	memset(packet, 0, PACKSIZE);
-	self->flag = ACK;
-	fprintf(stderr, "Sending ACK packet\n");
+	self->flag = ACK | FIN;
+	fprintf(stderr, "Sending ACK/FIN packet\n");
 	if ((outbytes = send_packet(packet, hinfo, self, other, PACKSIZE)) < 0) {
 		fprintf(stderr, "Error sending ACK packet\n");
-		return -1;
-	}
-
-	memset(packet, 0, PACKSIZE);
-	self->flag = FIN;
-	fprintf(stderr, "Sending FIN packet\n");
-	if ((outbytes = send_packet(packet, hinfo, self, other, PACKSIZE)) < 0) {
-		fprintf(stderr, "Error sending FIN packet\n");
 		return -1;
 	}
 
@@ -161,22 +254,10 @@ int terminate_server(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
 	memset(packet, 0, PACKSIZE);
 	while ((inbytes = recv_packet(packet, hinfo, self, other)) >= 0) {
 		if (inbytes < 0) {
-			fprintf(stderr, "Error receiving ACK reply\n");
+			fprintf(stderr, "Error receiving ACK/FIN reply\n");
 			return -1;
-		} else if (other->flag == ACK) {
-			fprintf(stderr, "Receiving ACK packet\n");
-			break;
-		} else {
-			continue;
-		}
-	}
-
-	while ((inbytes = recv_packet(packet, hinfo, self, other)) >= 0) {
-		if (inbytes < 0) {
-			fprintf(stderr, "Error receiving FIN packet\n");
-			return -1;
-		} else if (other->flag == FIN) {
-			fprintf(stderr, "Receiving FIN packet\n");
+		} else if (other->flag == ACK | FIN) {
+			fprintf(stderr, "Receiving ACK/FIN packet\n");
 			break;
 		} else {
 			continue;

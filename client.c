@@ -25,6 +25,9 @@ int main(int argc, char **argv)
 	uint16_t seq, ack;
 	size_t fsize = 0;
 
+	servAddrLen = sizeof(struct sockaddr_storage);
+	cliAddrLen = sizeof(struct sockaddr_storage);
+
 	// check program arguments
 	if (argc != 3) {
 		fprintf(stderr, "Usage: ./server SERVER-HOST-OR-IP PORT-NUMBER\n");

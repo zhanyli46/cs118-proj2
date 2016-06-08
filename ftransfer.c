@@ -240,7 +240,7 @@ static void *listen_ackpacket(void *userdata)
 	off_t *sendoffset = ud->sendoffset;
 	off_t *recvoffset = ud->recvoffset;
 	ssize_t *bytesonwire = ud->bytesonwire;
-	int *resendstat = ud->resendstat;
+	resendstat_t *resendstat = ud->resendstat;
 	wnditempool_t *witems = ud->witems;
 	int i;
 

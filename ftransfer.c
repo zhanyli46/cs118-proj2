@@ -53,6 +53,7 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 	int end = 0;
 	int i = 0;
 
+
 	// create listening thread
 	sendudata_t ud;
 	ud.hinfo = hinfo;
@@ -88,8 +89,10 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 	
 	while (!end) {
 		RESEND:
+		printf("BEGIN!!!\n");
 		// prepare to resend
 		pthread_mutex_lock(&wmutex);
+		printf("lock1\n");
 		if (resendstat == T_RESENDREQ) {
 			printf("other thread demands a resend\n");
 			resendstat = T_RESENDBEG;
@@ -97,6 +100,7 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 		pthread_mutex_unlock(&wmutex);
 
 		pthread_mutex_lock(&wmutex);
+		printf("lock2\n");
 		if (resendstat != T_RESENDFIN) {
 			pthread_mutex_unlock(&wmutex);
 			continue;
@@ -104,7 +108,6 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 		pthread_mutex_unlock(&wmutex);
 
 		// assume no packet loss, no congestion window
-		//cwnd = PACKSIZE * 5;
 		limit = (cwnd < rwnd) ? cwnd : rwnd;
 		availpack = (limit - bytesonwire) / PACKSIZE;
 
@@ -117,17 +120,20 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 			memset(packet, 0, PACKSIZE);
 			// read data
 			pthread_mutex_lock(&wmutex);
+			printf("lock3\n");
 			lseek(filefd, sendoffset, SEEK_SET);
 			if (resendstat == T_RESENDREQ) {
 				pthread_mutex_unlock(&wmutex);
 				goto RESEND;
 			}
+			printf("cp1\n");
 			if ((bytesread = read(filefd, packet + MAGICSIZE, DATASIZE)) < 0) {
-					fprintf(stderr, "Error reading file\n");
+				fprintf(stderr, "Error reading file\n");
 				return -1;
 			} else if (bytesread == 0) {
 				break;
 			}
+			printf("cp2\n");
 			faroffset = (faroffset < sendoffset) ? sendoffset : faroffset;
 			fprintf(stderr, "Reading at offset %zd for %zd bytes\n", sendoffset, bytesread);
 			param1 = (uint32_t)sendoffset;
@@ -135,17 +141,26 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 			self->seq = (param1 + initseq) % MAXSEQNUM;
 			
 			while (1) {
-				/*if (resendstat == T_RESENDREQ) {
-					pthread_mutex_unlock(&witems);
-					goto RESEND;
-				}*/
+		
+				printf("in while\n");
 				if (witems.nitems < witems.size) {
+					printf("if up\n");
 					gettimeofday(&curtime, NULL);
 					add_witem(&witems, sendoffset, self->seq, bytesread, &curtime);
 					break;
+				} else {
+					printf("if down\n");
+					while (witems.nitems > 0) {
+						remove_witem(&witems, witems.head);
+					}
+					bytesonwire = 0;
+					sendoffset = recvoffset;
+					pthread_mutex_unlock(&wmutex);
+					goto RESEND;
 				}
 			}
 			pthread_mutex_unlock(&wmutex);
+			printf("cp3\n");
 			
 			// send packet
 			//fprintf(stderr, "Sending data packet %hu %hu %hu\n", self->seq, cwnd, ssthresh);
@@ -159,7 +174,7 @@ int ftransfer_sender(hostinfo_t *hinfo, int filefd, size_t fsize, conninfo_t *se
 				fprintf(stderr, "Error sending packet\n");
 				return -1;
 			}
-			
+			printf("cp4\n");
 			sendoffset += bytesread;
 			bytesonwire += bsend;
 		}
@@ -279,13 +294,16 @@ static void *listen_ackpacket(void *userdata)
 		// trigger duplicate ACK retransmission
 		fprintf(stderr, "ACK log: last received ack = %u, nacked = %d\n", lastack, nacked);
 		if (nacked >= 3) {
+			printf("here-1?\n");
 			pthread_mutex_lock(&wmutex);
+			printf("here-2?\n");
 			printf("resendstat = %d\n", *resendstat);
 			*resendstat = T_RESENDREQ;
 			printf("update resendstat = %d\n", *resendstat);
 			pthread_mutex_unlock(&wmutex);
 
 			// wait for T_RESENDBEG to actually send the data
+			printf("here-3?\n");
 			while (1) {
 				pthread_mutex_lock(&wmutex);
 				if (*resendstat == T_RESENDBEG) {
@@ -330,6 +348,7 @@ static void *listen_ackpacket(void *userdata)
 				if (witems->list[i].offset < *recvoffset) {
 					pthread_mutex_lock(&wmutex);
 					*bytesonwire -= witems->list[i].datalen + MAGICSIZE;
+					printf("removing at %llu, head %d tail %d [%d]\n", witems->list[i].offset, witems->head, witems->tail, i);
 					remove_witem(witems, i);
 					pthread_mutex_unlock(&wmutex);
 				}
@@ -467,6 +486,19 @@ static void *listen_datapacket(void *userdata)
 					add_bitem(bitems, (off_t)*param1, other->seq, packet + MAGICSIZE, datalen);
 					pthread_mutex_unlock(&bmutex);
 					break;
+				} else {
+					// discard over-offset buffer
+					printf("before?\n");
+					*recvoffset = *bufoffset;
+					printf("after?\n");
+					while (bitems->nitems > 0) {
+						printf("remo\n");
+						remove_bitem(bitems, bitems->head);
+						printf("crash-1?\n");
+					}
+					pthread_mutex_unlock(&bmutex);
+					printf("crash-2?\n");
+					goto SENDACK;
 				}
 				pthread_mutex_unlock(&bmutex);
 			}
@@ -483,6 +515,8 @@ static void *listen_datapacket(void *userdata)
 				} while (i != bitems->tail);
 			}
 			pthread_mutex_unlock(&bmutex);
+				
+		SENDACK:
 			// send ACK
 			memset(packet, 0, PACKSIZE);
 			*param1 = 0;
@@ -499,6 +533,7 @@ static void *listen_datapacket(void *userdata)
 				exit(2);
 			}
 			goto CONT;
+
 		} else if ((*param1 > *recvoffset) && (*param1 > *recvoffset + BUFTHRESH)) {
 			// add to buffer
 			while (1) {
@@ -507,6 +542,16 @@ static void *listen_datapacket(void *userdata)
 					add_bitem(bitems, (off_t)*param1, other->seq, packet + MAGICSIZE, datalen);
 					pthread_mutex_unlock(&bmutex);
 					break;
+				} else {
+					// discard over-offset buffer
+					*recvoffset = *bufoffset;
+					while (bitems->nitems > 0) {
+						remove_bitem(bitems, bitems->head);
+						printf("crash1?\n");
+					}
+					pthread_mutex_unlock(&bmutex);
+					printf("crash2?\n");
+					goto SENDACK;
 				}
 				pthread_mutex_unlock(&bmutex);
 			}
@@ -521,7 +566,7 @@ static void *listen_datapacket(void *userdata)
 		self->ack = (*recvoffset + *initack) % MAXSEQNUM;
 		self->flag = ACK;
 		//fprintf(stderr, "Sending ACK packet %hu Retransmission\n", self->ack);
-		fprintf(stderr, "Sending ACK packet %lld\n", *param2);
+		fprintf(stderr, "Sending ACK packet %lld Retransmission\n", *param2);
 		if (send_packet(packet, hinfo, self, other, PACKSIZE) < 0) {
 			fprintf(stderr, "Fatal error: cannot send ACK packet, aborting\n");
 			exit(2);
@@ -617,38 +662,52 @@ static void add_bitem(bufitempool_t *bitems, off_t offset, uint32_t seq, unsigne
 
 static void remove_bitem(bufitempool_t *bitems, int index)
 {
+	printf("temp\n");
 	off_t temp = bitems->list[index].offset;
 
+	printf("nitems\n");
 	if (bitems->nitems == 0)
 		return;
 
-	if (bitems->tail == index) {
+	if (bitems->head == index && bitems->tail == index) {
+		printf("full!\n");
+
+	}
+	printf("here?\n");
+	printf("index = %d, head = %d, tail = %d\n", index,bitems->head,bitems->tail);
+	if (bitems->head == index) {
+		printf("should be in here\n");
+		bitems->head = (bitems->head + 1) % bitems->size;
+		bitems->nitems -= 1;
+		printf("finished?\n");
+	} else if (bitems->tail == index) {
+		printf("or here?\n");
 		memset(&bitems->list[0], 0, sizeof(bufitem_t));
 		if (bitems->tail == 0) {
 			bitems->tail = bitems->size - 1;
 		} else
 			bitems->tail -= 1;
 		bitems->nitems -= 1;
-	} else if (bitems->head == index) {
-		memset(&bitems->list[index], 0, sizeof(bufitem_t));
-		bitems->head = (bitems->head + 1) % bitems->size;
-		bitems->nitems -= 1;
 	} else if (index > bitems->head && index < bitems->tail && bitems->head < bitems->tail) {
+		printf("or the third?\n");
 		memmove(&bitems->list[index], &bitems->list[index + 1], bitems->tail - index);
 		memset(&bitems->list[bitems->tail], 0, sizeof(bufitem_t));
 		bitems->tail -= 1;
 		bitems->nitems -= 1;
 	} else if (index > bitems->head && index > bitems->tail && bitems->head > bitems->tail) {
+		printf("idk\n");
 		memmove(&bitems->list[bitems->head + 1], &bitems->list[bitems->head], index - bitems->head);
 		memset(&bitems->list[bitems->head], 0, sizeof(bufitem_t));
 		bitems->head += 1;
 		bitems->nitems -= 1;
 	} else if (index < bitems->tail && index < bitems->head && bitems->tail < bitems->head) {
+		printf("weird\n");
 		memmove(&bitems->list[index], &bitems->list[index + 1], bitems->tail - index);
 		memset(&bitems->list[bitems->tail], 0, sizeof(bufitem_t));
 		bitems->tail -= 1;
 		bitems->nitems -= 1;
 	} else {
+		printf("...\n");
 		return;
 	}
 	printf("$$$$$$ removing from %lld, head %d tail %d [%d]\n", temp, bitems->head, bitems->tail, index);

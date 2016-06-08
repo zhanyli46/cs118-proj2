@@ -22,12 +22,7 @@ int handshake_client(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other, siz
 
 	// send SYN + sequence number
 	CRESEND1:
-	if (resend == 0)
-		fprintf(stdout, "Sending SYN packet\n");
-	else {
-		fprintf(stdout, "Sending SYN packet Retransmission\n");
-		resend = 0;
-	}
+	fprintf(stdout, "Sending SYN packet\n");
 	gettimeofday(&begin, NULL);
 	if ((outbytes = send_packet(packet, hinfo, self, other, PACKSIZE)) < 0)
 		return -1;
@@ -162,7 +157,6 @@ START:
 	self->ack = nextseq;
 	memset(packet, 0, PACKSIZE);
 
-
 	SRESEND1:
 	// send SYN + ACK
 	if (resend == 0)
@@ -214,13 +208,42 @@ int terminate_client(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
 {
 	unsigned char packet[PACKSIZE];
 	ssize_t inbytes, outbytes;
+	struct timeval begin, end;
+	int bytesavail = 0;
+	int resend = 0;
 
 	memset(packet, 0, PACKSIZE);
 	self->flag = ACK | FIN;
-	fprintf(stderr, "Sending ACK/FIN packet\n");
+TCRESEND1:
+	gettimeofday(&begin, NULL);	
+	if (resend == 0)
+		fprintf(stderr, "Sending ACK/FIN packet\n");
+	else 
+		fprintf(stderr, "Sending ACK/FIN packet Retransmission\n");
 	if ((outbytes = send_packet(packet, hinfo, self, other, PACKSIZE)) < 0) {
 		fprintf(stderr, "Error sending ACK packet\n");
 		return -1;
+	}
+
+	while (1) {
+		// check socket buffer
+		ioctl(hinfo->sockfd, FIONREAD, &bytesavail);
+		if (bytesavail == 0) {
+			gettimeofday(&end, NULL);
+			if (resend == 0 && ((end.tv_sec - begin.tv_sec) * 1000000 + (end.tv_usec - begin.tv_usec) > TIMEOUT * 1000)) {
+				resend = 1;
+				goto TCRESEND1;
+			} else if (resend == 0 && ((end.tv_sec - begin.tv_sec) * 1000000 + (end.tv_usec - begin.tv_usec) > TIMEOUT * 1000)) {
+				// assume the connection is terminated
+				fprintf(stderr, "Receiving ACK packet\n");
+				return 0;
+			}
+		} else if (bytesavail < 0) {
+			// error
+			return -1;
+		} else {
+			break;
+		}
 	}
 
 	while ((inbytes = recv_packet(packet, hinfo, self, other)) >= 0) {
@@ -242,13 +265,39 @@ int terminate_server(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
 {
 	unsigned char packet[PACKSIZE];
 	ssize_t inbytes, outbytes;
-	
+	struct timeval begin, end;
+	int bytesavail = 0;
+	int resend = 0;
+
 	memset(packet, 0, PACKSIZE);
 	self->flag = FIN;
-	fprintf(stderr, "Sending FIN packet\n");
+
+	STRESEND1:
+	if (resend == 0)
+		fprintf(stderr, "Sending FIN packet\n");
+	else
+		fprintf(stderr, "Sending FIN packet Retransmission\n");
+	gettimeofday(&begin, NULL);
 	if ((outbytes = send_packet(packet, hinfo, self, other, PACKSIZE)) < 0) {
 		fprintf(stderr, "Error sending FIN packet\n");
 		return -1;
+	}
+	
+	while (1) {
+		// check socket buffer
+		ioctl(hinfo->sockfd, FIONREAD, &bytesavail);
+		if (bytesavail == 0) {
+			gettimeofday(&end, NULL);
+			if ((end.tv_sec - begin.tv_sec) * 1000000 + (end.tv_usec - begin.tv_usec) > TIMEOUT * 1000) {
+				resend = 1;
+				goto STRESEND1;
+			}
+		} else if (bytesavail < 0) {
+			// error
+			return -1;
+		} else {
+			break;
+		}
 	}
 
 	memset(packet, 0, PACKSIZE);

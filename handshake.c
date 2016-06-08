@@ -233,7 +233,7 @@ TCRESEND1:
 			if (resend == 0 && ((end.tv_sec - begin.tv_sec) * 1000000 + (end.tv_usec - begin.tv_usec) > TIMEOUT * 1000)) {
 				resend = 1;
 				goto TCRESEND1;
-			} else if (resend == 0 && ((end.tv_sec - begin.tv_sec) * 1000000 + (end.tv_usec - begin.tv_usec) > TIMEOUT * 1000)) {
+			} else if (resend == 1 && ((end.tv_sec - begin.tv_sec) * 1000000 + (end.tv_usec - begin.tv_usec) > TIMEOUT * 1000)) {
 				// assume the connection is terminated
 				fprintf(stderr, "Receiving ACK packet\n");
 				return 0;
@@ -305,7 +305,7 @@ int terminate_server(hostinfo_t *hinfo, conninfo_t *self, conninfo_t *other)
 		if (inbytes < 0) {
 			fprintf(stderr, "Error receiving ACK/FIN reply\n");
 			return -1;
-		} else if (other->flag == ACK | FIN) {
+		} else if (other->flag == (ACK | FIN)) {
 			fprintf(stderr, "Receiving ACK/FIN packet\n");
 			break;
 		} else {

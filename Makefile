@@ -28,6 +28,7 @@ util.o: util.c
 	$(CC) $(CFLAGS) -c util.c
 
 clean:
-	rm -rf *.o server client received_file
+	rm -rf *.o server client received_file cs118-zhanyangli.tar.gz
 
-.PHONY: server client *.o
+tar:
+	tar czvf cs118-zhanyangli.tar.gz *.c *.h Makefile 
